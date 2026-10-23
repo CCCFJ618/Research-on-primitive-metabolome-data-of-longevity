@@ -1,0 +1,269 @@
+# 0. 加载R包
+# =========================================================
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(ggtext)
+library(showtext)
+library(sysfonts)
+
+# =========================================================
+# 1. 注册 Times New Roman 字体
+# =========================================================
+font_add(
+  family = "TNR",
+  regular = "C:/Windows/Fonts/times.ttf",
+  bold = "C:/Windows/Fonts/timesbd.ttf",
+  italic = "C:/Windows/Fonts/timesi.ttf",
+  bolditalic = "C:/Windows/Fonts/timesbi.ttf"
+)
+
+showtext_auto()
+
+# =========================================================
+# 2. 读取数据
+# =========================================================
+file <- "C:/Users/Administrator/Desktop/长寿老人/长寿老人/老人-外显子组/carrier_fisher_all_results.xlsx"
+df <- read_excel(file)
+
+# =========================================================
+# 3. 提取需要的数据列
+#    按你当前表格列顺序
+# =========================================================
+dat <- df %>%
+  transmute(
+    Gene = .[[1]],
+    
+    # Longevity
+    L_carrier = as.numeric(.[[2]]),
+    L_noncarrier = as.numeric(.[[3]]),
+    
+    # Non-longevity
+    NL_carrier = as.numeric(.[[6]]),
+    NL_noncarrier = as.numeric(.[[7]]),
+    
+    # Fisher P value
+    P = as.numeric(.[[11]])
+  )
+
+# =========================================================
+# 4. 计算 corrected OR
+#    避免 OR = 0 或 Inf
+# =========================================================
+dat <- dat %>%
+  mutate(
+    OR_corrected =
+      ((L_carrier + 0.5) * (NL_noncarrier + 0.5)) /
+      ((L_noncarrier + 0.5) * (NL_carrier + 0.5)),
+    log2OR = log2(OR_corrected),
+    negLog10P = -log10(P)
+  )
+
+# =========================================================
+# 5. 定义分组
+# =========================================================
+dat <- dat %>%
+  mutate(
+    Group = case_when(
+      P <= 0.05 & log2OR > 0 ~ "Longevity",
+      P <= 0.05 & log2OR < 0 ~ "Non-longevity",
+      TRUE ~ "NS"
+    )
+  )
+
+# 可检查分组数量
+table(dat$Group)
+
+# =========================================================
+# 6. 定义颜色
+# =========================================================
+cols <- c(
+  "Non-longevity" = "#E8B878",
+  "Longevity" = "#72C3BC",
+  "NS" = "#C8C8C8"
+)
+
+# =========================================================
+# 7. 设置要标注的基因
+# =========================================================
+label_genes <- c("SI")
+
+label_dat <- dat %>%
+  filter(Gene %in% label_genes)
+
+# =========================================================
+# 8. 作图
+# =========================================================
+p <- ggplot(dat, aes(x = log2OR, y = negLog10P)) +
+  
+  # 数据点
+  geom_point(
+    aes(color = Group),
+    size = 3,
+    alpha = 0.85
+  ) +
+  
+  # 横向显著性阈值线
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    linewidth = 0.5,
+    color = "#777777"
+  ) +
+  
+  # 纵向 OR = 1 阈值线（log2OR = 0）
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.5,
+    color = "#777777"
+  ) +
+  
+  # SI标签
+  geom_label_repel(
+    data = label_dat,
+    aes(label = Gene),
+    family = "TNR",
+    fontface = "bold",
+    size = 4.8,              # 字体放大
+    color = "#B85C5C",
+    fill = "white",
+    box.padding = 0.35,
+    point.padding = 0.25,
+    min.segment.length = 0,
+    segment.color = "#B85C5C",
+    segment.size = 0.6,
+    label.size = 0.5,
+    show.legend = FALSE
+  ) +
+  
+  # 配色
+  scale_color_manual(
+    values = cols,
+    breaks = c("Non-longevity", "Longevity", "NS")
+  ) +
+  
+  # 横坐标刻度
+  scale_x_continuous(
+    breaks = c(-5, -3, 0, 3, 5)
+  ) +
+  
+  # 坐标标题（用ggtext显示下标）
+  labs(
+    x = "log<sub>2</sub>(OR)",
+    y = "−log<sub>10</sub>(P value)",
+    color = NULL
+  ) +
+  
+  # 坐标范围
+  coord_cartesian(
+    xlim = c(-5.2, 5.2),
+    ylim = c(0, 3.2)
+  ) +
+  
+  theme_classic(base_size = 12) +
+  
+  theme(
+    # 图形比例
+    aspect.ratio = 1,
+    
+    # 去除 classic 自带轴线
+    axis.line = element_blank(),
+    
+    # 四周边框
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    # 坐标轴标题
+    axis.title.x = ggtext::element_markdown(
+      family = "TNR",
+      face = "bold",
+      size = 16,             # 放大
+      color = "black",
+      margin = margin(t = 8)
+    ),
+    axis.title.y = ggtext::element_markdown(
+      family = "TNR",
+      face = "bold",
+      size = 16,             # 放大
+      color = "black",
+      margin = margin(r = 8)
+    ),
+    
+    # 坐标轴刻度数字
+    axis.text.x = element_text(
+      family = "TNR",
+      face = "bold",
+      size = 14,             # 放大
+      color = "black"
+    ),
+    axis.text.y = element_text(
+      family = "TNR",
+      face = "bold",
+      size = 14,             # 放大
+      color = "black"
+    ),
+    
+    # 刻度线
+    axis.ticks = element_line(
+      linewidth = 1.0,
+      color = "black"
+    ),
+    
+    # 图例
+    legend.position = c(0.95, 0.99),
+    legend.justification = c(1, 1),
+    legend.direction = "vertical",
+    
+    legend.text = element_text(
+      family = "TNR",
+      face = "bold",
+      size = 13,             # 放大
+      color = "black"
+    ),
+    
+    legend.background = element_blank(),
+    legend.key = element_blank(),
+    
+    plot.margin = margin(8, 10, 8, 8)
+  ) +
+  
+  # 图例点大小
+  guides(
+    color = guide_legend(
+      override.aes = list(
+        size = 3.2,
+        alpha = 1
+      )
+    )
+  )
+
+# =========================================================
+# 9. 显示图
+# =========================================================
+p
+
+#导出PDF
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig1B_carrier_volcano.pdf",
+  plot = p,
+  width = 5.5,
+  height = 5.5,
+  units = "in",
+  device = cairo_pdf
+)
+
+#导出PNG
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig1B_carrier_volcano.png",
+  plot = p,
+  width = 5.5,
+  height = 5.5,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
