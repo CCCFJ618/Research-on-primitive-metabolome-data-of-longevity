@@ -1,0 +1,325 @@
+# ============================================================
+# Fig.3E
+# ============================================================
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggpubr)
+
+
+# ------------------------------------------------------------
+# Groups
+# ------------------------------------------------------------
+longevity_samples <- c(
+  "BD01", "CF02",
+  "DM02", "DM04", "DM07", "DM16", "DM21", "DM22", "DM23",
+  "DO23", "DO24",
+  "DX04", "DX05", "DX06",
+  "HZ04", "HZ09", "HZ15", "HZ29", "HZ35",
+  "NQ23", "NQ25"
+)
+
+nonlongevity_samples <- c(
+  "BD11",
+  "CF04", "CF12", "CF14", "CF15", "CF18", "CF20", "CF21",
+  "CF24", "CF26", "CF28",
+  "DM05", "DM10", "DM15", "DM24", "DM25", "DM26",
+  "HZ05", "HZ12", "HZ18", "HZ21", "HZ26", "HZ34",
+  "NQ16", "NQ18", "NQ30"
+)
+
+all_samples <- c(
+  longevity_samples,
+  nonlongevity_samples
+)
+
+
+
+# ------------------------------------------------------------
+# Target GH13 families
+# ------------------------------------------------------------
+target_GH13 <- c(
+  "GH13_18",
+  "GH13_28",
+  "GH13_39"
+)
+
+missing_family <- setdiff(
+  target_GH13,
+  cazy_clean$Family
+)
+
+if (length(missing_family) > 0) {
+  stop(
+    "以下 CAZy family 没找到：",
+    paste(missing_family, collapse = ", ")
+  )
+}
+
+# ------------------------------------------------------------
+# Extract target families
+# ------------------------------------------------------------
+gh13_df <- cazy_clean %>%
+  filter(Family %in% target_GH13) %>%
+  select(Family, all_of(all_samples)) %>%
+  pivot_longer(
+    cols = -Family,
+    names_to = "Sample",
+    values_to = "Abundance"
+  ) %>%
+  mutate(
+    Abundance = as.numeric(Abundance),
+    
+    Group = case_when(
+      Sample %in% longevity_samples ~ "Longevity",
+      Sample %in% nonlongevity_samples ~ "Non-longevity"
+    ),
+    
+    Group = factor(
+      Group,
+      levels = c(
+        "Non-longevity",
+        "Longevity"
+      )
+    ),
+    
+    Family = factor(
+      Family,
+      levels = c(
+        "GH13_18",
+        "GH13_28",
+        "GH13_39"
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+# Pseudocount
+# ------------------------------------------------------------
+positive_values <- gh13_df$Abundance[
+  gh13_df$Abundance > 0
+]
+
+pseudo <- min(
+  positive_values,
+  na.rm = TRUE
+) / 2
+
+cat("Pseudocount =", pseudo, "\n")
+
+gh13_df <- gh13_df %>%
+  mutate(
+    log_abundance = log10(
+      Abundance + pseudo
+    )
+  )
+
+# ------------------------------------------------------------
+# Wilcoxon tests
+# ------------------------------------------------------------
+stat_df <- gh13_df %>%
+  group_by(Family) %>%
+  summarise(
+    p = wilcox.test(
+      Abundance ~ Group,
+      exact = FALSE
+    )$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    p_label = case_when(
+      p < 0.001 ~ "P < 0.001",
+      TRUE ~ paste0(
+        "P = ",
+        sprintf("%.3f", p)
+      )
+    )
+  )
+
+print(stat_df)
+
+# ------------------------------------------------------------
+# Colors
+# ------------------------------------------------------------
+group_cols <- c(
+  "Non-longevity" = "#D9A66F",
+  "Longevity" = "#4F8F83"
+)
+
+# ------------------------------------------------------------
+# Violin plot
+# ------------------------------------------------------------
+p_violin <- ggplot(
+  gh13_df,
+  aes(
+    x = Group,
+    y = log_abundance,
+    fill = Group
+  )
+) +
+  
+  # Violin
+  geom_violin(
+    width = 0.88,
+    trim = FALSE,
+    alpha = 0.72,
+    color = "black",
+    linewidth = 1.2
+  ) +
+  
+  # Small boxplot inside violin
+  geom_boxplot(
+    width = 0.18,
+    outlier.shape = NA,
+    fill = "white",
+    color = "black",
+    linewidth = 0.9
+  ) +
+  
+  # Individual samples
+  geom_jitter(
+    aes(color = Group),
+    width = 0.10,
+    size = 2.2,
+    alpha = 0.72,
+    show.legend = FALSE
+  ) +
+  
+  # Three panels
+  facet_wrap(
+    ~ Family,
+    nrow = 1,
+    scales = "free_y"
+  ) +
+  
+  scale_fill_manual(
+    values = group_cols
+  ) +
+  
+  scale_color_manual(
+    values = group_cols
+  ) +
+  
+  labs(
+    x = NULL,
+    y = expression(
+      log[10]~"(Relative abundance + pseudocount)"
+    ),
+    fill = NULL
+  ) +
+  
+  theme_classic(
+    base_family = "Arial"
+  ) +
+  
+  theme(
+    text = element_text(
+      family = "Arial",
+      face = "bold",
+      color = "black"
+    ),
+    
+    strip.background = element_blank(),
+    
+    strip.text = element_text(
+      family = "Arial",
+      size = 17,
+      face = "bold",
+      color = "#B85C5C"
+    ),
+    
+    axis.title.y = element_text(
+      family = "Arial",
+      size = 16,
+      face = "bold"
+    ),
+    
+    axis.text.x = element_text(
+      family = "Arial",
+      size = 13,
+      face = "bold",
+      color = "black",
+      angle = 0,
+      hjust = 0.5,
+      vjust = 0.5
+    ),
+    
+    axis.text.y = element_text(
+      family = "Arial",
+      size = 13,
+      face = "bold",
+      color = "black"
+    ),
+    
+    axis.line = element_blank(),
+    
+    axis.ticks = element_line(
+      linewidth = 0.9,
+      color = "black"
+    ),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    legend.position = "none",
+    
+    panel.spacing = unit(
+      0.8,
+      "lines"
+    )
+  )
+
+p_violin
+
+
+# ------------------------------------------------------------
+# Add P values
+# ------------------------------------------------------------
+
+label_pos <- gh13_df %>%
+  group_by(Family) %>%
+  summarise(
+    y.position = max(
+      log_abundance,
+      na.rm = TRUE
+    ) + 0.12 * diff(range(log_abundance)),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    stat_df,
+    by = "Family"
+  )
+
+p_violin_final <- p_violin +
+  geom_text(
+    data = label_pos,
+    aes(
+      x = 1.5,
+      y = y.position,
+      label = p_label
+    ),
+    inherit.aes = FALSE,
+    family = "Arial",
+    fontface = "bold",
+    size = 5
+  )
+
+p_violin_final
+
+
+# ------------------------------------------------------------
+# 10. 导出为 PDF
+#     Cairo PDF
+#     不经过 showtext
+# ------------------------------------------------------------
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig2D_GH13_violin.pdf",
+  plot = p_violin_final,
+  width = 9.2,
+  height = 4.8,
+  device = cairo_pdf
+)
