@@ -1,0 +1,291 @@
+# ============================================================
+# Fig.3D CAZy longevity-enriched parent family barplot
+# GH13 highlighted
+# ============================================================
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(grid)
+
+# ------------------------------------------------------------
+# Input
+# ------------------------------------------------------------
+file_path <- "C:/Users/Administrator/Desktop/长寿老人/长寿老人/老人-外显子组/CAZy_longevity_vs_nonlongevity_with_prevalence.xlsx"
+
+dat <- read_xlsx(
+  file_path,
+  sheet = 1
+)
+
+# ------------------------------------------------------------
+# Parameters
+# ------------------------------------------------------------
+p_cutoff <- 0.05
+
+col_longevity <- "#4F8F83"
+col_GH13 <- "#B85C5C"
+
+# ------------------------------------------------------------
+# Extract parent family
+#    GH13_18 -> GH13
+#    GH13_28 -> GH13
+#    GH13_39 -> GH13
+# ------------------------------------------------------------
+plot_df <- dat %>%
+  mutate(
+    parent_family = str_extract(
+      Family,
+      "^[A-Za-z]+\\d+"
+    )
+  ) %>%
+  filter(
+    !is.na(parent_family),
+    p < p_cutoff,
+    Direction_mean == "Up"
+  ) %>%
+  count(
+    parent_family,
+    name = "Count"
+  ) %>%
+  arrange(
+    desc(Count),
+    parent_family
+  )
+
+# ------------------------------------------------------------
+# Print counts
+# ------------------------------------------------------------
+cat("\n============================\n")
+cat("Significant longevity-enriched CAZy parent families\n")
+cat("============================\n")
+
+print(
+  plot_df,
+  n = Inf
+)
+
+# ------------------------------------------------------------
+# Ordering
+# ------------------------------------------------------------
+plot_df <- plot_df %>%
+  mutate(
+    parent_family = factor(
+      parent_family,
+      levels = parent_family
+    ),
+    
+    bar_group = ifelse(
+      parent_family == "GH13",
+      "GH13",
+      "Other"
+    ),
+    
+    label_color = ifelse(
+      parent_family == "GH13",
+      "GH13",
+      "Other"
+    )
+  )
+
+# ------------------------------------------------------------
+# Plot
+# ------------------------------------------------------------
+p1 <- ggplot(
+  plot_df,
+  aes(
+    x = parent_family,
+    y = Count,
+    fill = bar_group
+  )
+) +
+  
+  geom_col(
+    width = 0.72,
+    color = "black",
+    linewidth = 1.5
+  ) +
+  
+  # ----------------------------------------------------------
+# Number labels
+# GH13 = red
+# Others = black
+# ----------------------------------------------------------
+geom_text(
+  aes(
+    label = Count,
+    color = label_color
+  ),
+  vjust = -0.28,
+  size = 5.8,
+  family = "Arial",
+  fontface = "bold"
+) +
+  
+  # ----------------------------------------------------------
+# Fill colors
+# ----------------------------------------------------------
+scale_fill_manual(
+  values = c(
+    "GH13" = col_GH13,
+    "Other" = col_longevity
+  )
+) +
+  
+  # ----------------------------------------------------------
+# Number colors
+# ----------------------------------------------------------
+scale_color_manual(
+  values = c(
+    "GH13" = col_GH13,
+    "Other" = "black"
+  )
+) +
+  
+  # ----------------------------------------------------------
+# Y axis
+# ----------------------------------------------------------
+scale_y_continuous(
+  limits = c(
+    0,
+    max(plot_df$Count) + 0.28
+  ),
+  
+  breaks = seq(
+    0,
+    max(plot_df$Count),
+    by = 1
+  ),
+  
+  expand = expansion(
+    mult = c(0, 0)
+  )
+) +
+  
+  # ----------------------------------------------------------
+# Axis labels
+# ----------------------------------------------------------
+labs(
+  x = "CAZy parent family",
+  y = "Number of differential subfamilies"
+) +
+  
+  theme_classic(
+    base_family = "Arial"
+  ) +
+  
+  theme(
+    
+    # --------------------------------------------------------
+    # Overall font
+    # --------------------------------------------------------
+    text = element_text(
+      family = "Arial",
+      face = "bold",
+      color = "black"
+    ),
+    
+    # --------------------------------------------------------
+    # X labels
+    # --------------------------------------------------------
+    axis.text.x = element_text(
+      size = 15,
+      color = "black",
+      face = "bold",
+      angle = 45,
+      hjust = 1,
+      vjust = 1
+    ),
+    
+    # --------------------------------------------------------
+    # Y labels
+    # --------------------------------------------------------
+    axis.text.y = element_text(
+      size = 15,
+      color = "black",
+      face = "bold"
+    ),
+    
+    # --------------------------------------------------------
+    # Axis titles
+    # --------------------------------------------------------
+    axis.title.x = element_text(
+      size = 18,
+      color = "black",
+      face = "bold",
+      margin = margin(
+        t = 8
+      )
+    ),
+    
+    axis.title.y = element_text(
+      size = 18,
+      color = "black",
+      face = "bold",
+      margin = margin(
+        r = 8
+      )
+    ),
+    
+    # --------------------------------------------------------
+    # IMPORTANT
+    # remove axis.line to avoid double thickness
+    # --------------------------------------------------------
+    axis.line = element_blank(),
+    
+    # --------------------------------------------------------
+    # Ticks
+    # --------------------------------------------------------
+    axis.ticks = element_line(
+      color = "black",
+      linewidth = 1
+    ),
+    
+    axis.ticks.length = unit(
+      0.16,
+      "cm"
+    ),
+    
+    # --------------------------------------------------------
+    # Four borders identical
+    # --------------------------------------------------------
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    # --------------------------------------------------------
+    # No legend
+    # --------------------------------------------------------
+    legend.position = "none",
+    
+    # --------------------------------------------------------
+    # Margins
+    # --------------------------------------------------------
+    plot.margin = margin(
+      t = 8,
+      r = 8,
+      b = 8,
+      l = 8
+    )
+  )
+
+# ------------------------------------------------------------
+# 8. Show
+# ------------------------------------------------------------
+p1
+
+# ------------------------------------------------------------
+# 9. 导出为 PDF
+#    Cairo PDF
+#    不经过 showtext
+# ------------------------------------------------------------
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig2C_CAZy_longevity_barplot.pdf",
+  plot = p1,
+  width = 6.2,
+  height = 6.0,
+  device = cairo_pdf
+)
