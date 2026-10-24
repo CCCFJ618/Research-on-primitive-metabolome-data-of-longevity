@@ -1,0 +1,535 @@
+# ============================================================
+# MaAsLin2 Top10 forest plot
+# Left : Longevity vs Young
+# Right: Longevity vs Middle
+# Green  = Longevity-enriched
+# Yellow = Non-longevity-enriched
+# Grey   = NS
+# ============================================================
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(grid)
+
+# ------------------------------------------------------------
+# File path
+# ------------------------------------------------------------
+maaslin_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "长寿老人/长寿老人/老人-宏基因组/",
+  "地区之间的比较—确定年龄分组/",
+  "MaAsLin2年龄分组.xlsx"
+)
+
+# ------------------------------------------------------------
+# Parameters
+# ------------------------------------------------------------
+top_n <- 10
+
+target_species <- "Bifidobacterium adolescentis"
+
+# Colors
+col_longevity <- "#4F8F83"
+col_nonlongev <- "#D8A15B"
+col_ns        <- "#9E9E9E"
+col_target    <- "#B85C5C"
+
+group_levels <- c(
+  "Longevity-enriched",
+  "Non-longevity-enriched",
+  "NS"
+)
+
+# ------------------------------------------------------------
+# Read data
+# ------------------------------------------------------------
+df_young_raw <- read_excel(
+  maaslin_file,
+  sheet = "Longevity_vs_Young"
+)
+
+df_middle_raw <- read_excel(
+  maaslin_file,
+  sheet = "Longevity_vs_Middle"
+)
+
+# ------------------------------------------------------------
+# Clean function
+# ------------------------------------------------------------
+clean_maaslin <- function(df, comparison_name) {
+  
+  df %>%
+    mutate(
+      feature = as.character(feature),
+      metadata = as.character(metadata),
+      value = as.character(value),
+      
+      coef = as.numeric(coef),
+      stderr = as.numeric(stderr),
+      
+      N = as.numeric(N),
+      N.not.0 = as.numeric(N.not.0),
+      
+      pval = as.numeric(pval),
+      
+      qval = suppressWarnings(
+        as.numeric(qval)
+      ),
+      
+      coef_longevity = as.numeric(
+        coef_longevity
+      ),
+      
+      comparison = comparison_name,
+      
+      Species = gsub(
+        "\\.",
+        " ",
+        feature
+      ),
+      
+      # 95% confidence interval
+      CI_low =
+        coef_longevity -
+        1.96 * stderr,
+      
+      CI_high =
+        coef_longevity +
+        1.96 * stderr,
+      
+      group = case_when(
+        
+        !is.na(pval) &
+          pval < 0.05 &
+          coef_longevity > 0 ~
+          "Longevity-enriched",
+        
+        !is.na(pval) &
+          pval < 0.05 &
+          coef_longevity < 0 ~
+          "Non-longevity-enriched",
+        
+        TRUE ~
+          "NS"
+      ),
+      
+      group = factor(
+        group,
+        levels = group_levels
+      )
+    ) %>%
+    
+    filter(
+      !is.na(Species),
+      Species != "",
+      !is.na(coef_longevity),
+      !is.na(stderr),
+      !is.na(pval)
+    )
+}
+
+# ------------------------------------------------------------
+# Clean both comparisons
+# ------------------------------------------------------------
+df_young <- clean_maaslin(
+  df_young_raw,
+  "Longevity vs Young"
+)
+
+df_middle <- clean_maaslin(
+  df_middle_raw,
+  "Longevity vs Middle"
+)
+
+# ------------------------------------------------------------
+# Select TRUE Top10 by absolute coefficient
+# ------------------------------------------------------------
+get_top10 <- function(df, top_n = 10) {
+  
+  df %>%
+    arrange(
+      desc(
+        abs(coef_longevity)
+      )
+    ) %>%
+    
+    slice_head(
+      n = top_n
+    ) %>%
+    
+    arrange(
+      coef_longevity
+    ) %>%
+    
+    mutate(
+      Species_label = Species,
+      
+      Species_label = factor(
+        Species_label,
+        levels = Species_label
+      ),
+      
+      group = factor(
+        group,
+        levels = group_levels
+      ),
+      
+      target = ifelse(
+        Species == target_species,
+        "Target",
+        "Other"
+      )
+    )
+}
+
+# ------------------------------------------------------------
+# Prepare plotting data
+# ------------------------------------------------------------
+plot_young <- get_top10(
+  df_young,
+  top_n
+)
+
+plot_middle <- get_top10(
+  df_middle,
+  top_n
+)
+
+# ------------------------------------------------------------
+# Check Top10
+# ------------------------------------------------------------
+cat("\n================ Longevity vs Young Top10 ================\n")
+
+print(
+  plot_young %>%
+    select(
+      Species,
+      coef_longevity,
+      pval,
+      qval,
+      group
+    ),
+  n = Inf
+)
+
+cat("\n================ Longevity vs Middle Top10 ================\n")
+
+print(
+  plot_middle %>%
+    select(
+      Species,
+      coef_longevity,
+      pval,
+      qval,
+      group
+    ),
+  n = Inf
+)
+
+# ------------------------------------------------------------
+# Colors
+# ------------------------------------------------------------
+my_cols <- c(
+  "Longevity-enriched" = col_longevity,
+  "Non-longevity-enriched" = col_nonlongev,
+  "NS" = col_ns
+)
+
+# ------------------------------------------------------------
+# Forest plot function
+# ------------------------------------------------------------
+make_forest_plot <- function(df, title_text) {
+  
+  ggplot(
+    df,
+    aes(
+      x = coef_longevity,
+      y = Species_label
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Zero reference line
+  # --------------------------------------------------------
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.8,
+    color = "#666666"
+  ) +
+    
+    # --------------------------------------------------------
+  # 95% CI
+  # --------------------------------------------------------
+  geom_segment(
+    aes(
+      x = CI_low,
+      xend = CI_high,
+      y = Species_label,
+      yend = Species_label,
+      color = group
+    ),
+    linewidth = 1.35,
+    alpha = 0.95,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # Coefficient points
+  # --------------------------------------------------------
+  geom_point(
+    aes(
+      color = group
+    ),
+    size = 4,
+    alpha = 1,
+    show.legend = TRUE
+  ) +
+    
+    # --------------------------------------------------------
+  # Extra red outline for B. adolescentis
+  # if naturally present in Top10
+  # --------------------------------------------------------
+  geom_point(
+    data = df %>%
+      filter(
+        Species == target_species
+      ),
+    shape = 21,
+    fill = NA,
+    color = col_target,
+    stroke = 1.2,
+    size = 5,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # Color scale
+  # --------------------------------------------------------
+  scale_color_manual(
+    name = NULL,
+    
+    values = my_cols,
+    
+    limits = group_levels,
+    
+    breaks = group_levels,
+    
+    labels = c(
+      "Longevity-enriched",
+      "Non-longevity",
+      "NS"
+    ),
+    
+    drop = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # Labels
+  # --------------------------------------------------------
+  labs(
+    title = title_text,
+    x = "MaAsLin2 coefficient",
+    y = NULL
+  ) +
+    
+    coord_cartesian(
+      clip = "off"
+    ) +
+    
+    # --------------------------------------------------------
+  # Theme
+  # --------------------------------------------------------
+  theme_classic(
+    base_family = "Arial"
+  ) +
+    
+    theme(
+      
+      text = element_text(
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      # Title
+      plot.title = element_text(
+        family = "Arial",
+        size = 20,
+        face = "bold",
+        hjust = 0.5,
+        vjust = 2.5,
+        margin = margin(
+          b = 12
+        )
+      ),
+      
+      # X-axis title
+      axis.title.x = element_text(
+        family = "Arial",
+        size = 16,
+        face = "bold",
+        margin = margin(
+          t = 10
+        )
+      ),
+      
+      # X-axis tick labels
+      axis.text.x = element_text(
+        family = "Arial",
+        size = 13,
+        face = "bold",
+        color = "black"
+      ),
+      
+      # ------------------------------------------------------
+      # IMPORTANT:
+      # Standard element_text instead of ggtext
+      # This keeps species names as ordinary text
+      # ------------------------------------------------------
+      axis.text.y = element_text(
+        family = "Arial",
+        size = 12,
+        face = "bold",
+        color = "black"
+      ),
+      
+      axis.line = element_blank(),
+      
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 1.5
+      ),
+      
+      axis.ticks = element_line(
+        color = "black",
+        linewidth = 1
+      ),
+      
+      # ------------------------------------------------------
+      # Legend
+      # ------------------------------------------------------
+      legend.position = c(
+        0.5,
+        1.01
+      ),
+      
+      legend.justification = c(
+        0.5,
+        0
+      ),
+      
+      legend.direction = "horizontal",
+      
+      legend.box = "horizontal",
+      
+      legend.text = element_text(
+        family = "Arial",
+        size = 10.5,
+        face = "bold",
+        color = "black"
+      ),
+      
+      legend.key = element_blank(),
+      
+      legend.key.width = unit(
+        0.35,
+        "cm"
+      ),
+      
+      legend.key.height = unit(
+        0.35,
+        "cm"
+      ),
+      
+      legend.spacing.x = unit(
+        0.08,
+        "cm"
+      ),
+      
+      legend.margin = margin(
+        t = 0,
+        r = 0,
+        b = 0,
+        l = 0
+      ),
+      
+      plot.margin = margin(
+        t = 38,
+        r = 15,
+        b = 10,
+        l = 10
+      )
+    ) +
+    
+    guides(
+      color = guide_legend(
+        override.aes = list(
+          size = 4.2,
+          alpha = 1
+        ),
+        nrow = 1,
+        byrow = TRUE
+      )
+    )
+}
+
+# ------------------------------------------------------------
+#  Create two panels
+# ------------------------------------------------------------
+p_young <- make_forest_plot(
+  plot_young,
+  "Longevity vs Young"
+)
+
+p_middle <- make_forest_plot(
+  plot_middle,
+  "Longevity vs Middle"
+)
+
+# ------------------------------------------------------------
+# 13. Combine
+# ------------------------------------------------------------
+p <- (
+  p_young +
+    p_middle
+) +
+  plot_layout(
+    ncol = 2
+  )
+
+# ------------------------------------------------------------
+# 14. Show
+# ------------------------------------------------------------
+p
+
+# ============================================================
+# 15. Export PDF
+#
+# IMPORTANT:
+# No showtext
+# Cairo PDF
+# System Arial
+# ============================================================
+
+grDevices::cairo_pdf(
+  filename = paste0(
+    "C:/Users/Administrator/Desktop/",
+    "Fig3G_MaAsLin2_top10_TEXT.pdf"
+  ),
+  width = 13,
+  height = 7,
+  family = "Arial"
+)
+
+print(p)
+
+dev.off()
+
+cat(
+  "\nPDF exported successfully:\n",
+  "C:/Users/Administrator/Desktop/Fig3G_MaAsLin2_top10_TEXT.pdf\n"
+)
