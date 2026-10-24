@@ -1,0 +1,653 @@
+# ============================================================
+# Hainan RF Top10 species vs Age
+# Spearman correlation ranking
+# ============================================================
+
+# ------------------------------------------------------------
+# 0. Load packages
+# ------------------------------------------------------------
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(writexl)
+
+
+# ============================================================
+# PART 1
+# Rebuild Hainan RF Top10
+# ============================================================
+
+# ------------------------------------------------------------
+#  RF file
+# ------------------------------------------------------------
+rf_file <- paste0(
+  "C:/Users/Administrator/Desktop/长寿老人/长寿老人/",
+  "老人-宏基因组/地区之间的比较—确定年龄分组/",
+  "RF结果.xlsx"
+)
+
+rf_hainan <- read_excel(
+  rf_file,
+  sheet = "Hainan_rank"
+)
+
+# ------------------------------------------------------------
+#  Parameters
+# ------------------------------------------------------------
+target_species <- "Bifidobacterium.adolescentis"
+
+top_n <- 10
+
+# ------------------------------------------------------------
+#  Clean RF results
+# ------------------------------------------------------------
+rf_hainan_clean <- rf_hainan %>%
+  mutate(
+    Species = trimws(as.character(Species)),
+    MeanDecreaseGini = as.numeric(MeanDecreaseGini)
+  ) %>%
+  filter(
+    !is.na(Species),
+    Species != "",
+    !is.na(MeanDecreaseGini),
+    !Species %in% manual_remove_species
+  ) %>%
+  arrange(
+    desc(MeanDecreaseGini)
+  )
+
+# ------------------------------------------------------------
+#  Natural Top10
+# ------------------------------------------------------------
+hainan_top10 <- rf_hainan_clean %>%
+  slice_head(
+    n = top_n
+  )
+
+# ------------------------------------------------------------
+# Force B. adolescentis into Top10
+#    if it is not naturally included
+# ------------------------------------------------------------
+ba_row <- rf_hainan_clean %>%
+  filter(
+    Species == target_species
+  )
+
+if (
+  nrow(ba_row) > 0 &&
+  !(target_species %in% hainan_top10$Species)
+) {
+  
+  hainan_top10 <- bind_rows(
+    
+    rf_hainan_clean %>%
+      slice_head(
+        n = top_n - 1
+      ),
+    
+    ba_row
+    
+  ) %>%
+    distinct(
+      Species,
+      .keep_all = TRUE
+    )
+}
+
+# ------------------------------------------------------------
+#  Create matching key
+#
+# RF names:
+# Bifidobacterium.adolescentis
+#
+# Species_key uses the same R-safe naming convention
+# ------------------------------------------------------------
+hainan_top10 <- hainan_top10 %>%
+  mutate(
+    Species_key = Species
+  )
+
+cat("\n========================================\n")
+cat("FINAL HAINAN RF TOP10\n")
+cat("========================================\n")
+
+print(
+  hainan_top10 %>%
+    select(
+      Species,
+      MeanDecreaseGini
+    ),
+  n = Inf
+)
+
+cat(
+  "\nNumber of RF species =",
+  nrow(hainan_top10),
+  "\n"
+)
+
+# ============================================================
+# PART 2
+# Metadata
+# ============================================================
+
+# ------------------------------------------------------------
+# Read metadata
+# ------------------------------------------------------------
+meta_file <- "C:/Users/Administrator/Desktop/ncbi_meta.xlsx"
+
+meta <- read_excel(
+  meta_file,
+  sheet = 1
+)
+
+cat("\nMetadata columns:\n")
+print(colnames(meta))
+
+# ------------------------------------------------------------
+#  Hainan metadata
+# ------------------------------------------------------------
+meta_hainan <- meta %>%
+  transmute(
+    Sample = trimws(as.character(prob)),
+    Age = as.numeric(age),
+    Area = trimws(as.character(area))
+  ) %>%
+  filter(
+    Area == "Hainan",
+    !is.na(Sample),
+    Sample != "",
+    !is.na(Age)
+  )
+
+cat(
+  "\nNumber of Hainan metadata samples =",
+  nrow(meta_hainan),
+  "\n"
+)
+
+# 查看年龄范围
+cat(
+  "Hainan age range =",
+  min(meta_hainan$Age),
+  "-",
+  max(meta_hainan$Age),
+  "\n"
+)
+
+# ============================================================
+# PART 3
+# Prepare bracken
+# ============================================================
+
+# ------------------------------------------------------------
+# Check bracken
+# ------------------------------------------------------------
+if (!exists("bracken")) {
+  
+  stop(
+    "\n当前 R 环境中没有对象 'bracken'。\n",
+    "请先读取你的 species abundance 表并命名为 bracken。"
+  )
+}
+
+# ------------------------------------------------------------
+#  Clean bracken species names
+#
+# ------------------------------------------------------------
+bracken_clean <- bracken %>%
+  mutate(
+    Species = trimws(as.character(Species)),
+    
+    Species_key = make.names(
+      Species
+    )
+  )
+
+# ------------------------------------------------------------
+# Check Top10 species matching
+# ------------------------------------------------------------
+missing_species <- setdiff(
+  hainan_top10$Species_key,
+  bracken_clean$Species_key
+)
+
+cat("\n========================================\n")
+cat("SPECIES MATCHING CHECK\n")
+cat("========================================\n")
+
+if (length(missing_species) == 0) {
+  
+  cat(
+    "\nAll 10 RF species were found in bracken.\n"
+  )
+  
+} else {
+  
+  cat(
+    "\nWARNING: These RF species were NOT found in bracken:\n"
+  )
+  
+  print(missing_species)
+}
+
+# ------------------------------------------------------------
+#  Match Hainan samples
+# ------------------------------------------------------------
+shared_samples <- intersect(
+  meta_hainan$Sample,
+  colnames(bracken_clean)
+)
+
+cat(
+  "\nNumber of matched Hainan samples =",
+  length(shared_samples),
+  "\n"
+)
+
+# 检查没有匹配上的 metadata 样本
+missing_samples <- setdiff(
+  meta_hainan$Sample,
+  colnames(bracken_clean)
+)
+
+if (length(missing_samples) > 0) {
+  
+  cat(
+    "\nMetadata samples not found in bracken:\n"
+  )
+  
+  print(missing_samples)
+}
+
+# ------------------------------------------------------------
+#  Extract Top10 species
+# ------------------------------------------------------------
+bracken_top10 <- bracken_clean %>%
+  filter(
+    Species_key %in% hainan_top10$Species_key
+  ) %>%
+  select(
+    Species,
+    Species_key,
+    all_of(shared_samples)
+  )
+
+cat(
+  "\nNumber of matched Top10 species =",
+  nrow(bracken_top10),
+  "\n"
+)
+
+print(
+  bracken_top10 %>%
+    select(
+      Species,
+      Species_key
+    ),
+  n = Inf
+)
+
+# ------------------------------------------------------------
+#  Strong check
+# ------------------------------------------------------------
+if (nrow(bracken_top10) != 10) {
+  
+  warning(
+    paste0(
+      "\n注意：当前只匹配到 ",
+      nrow(bracken_top10),
+      " 个菌，而不是10个。\n",
+      "请先查看上面的 missing_species。"
+    )
+  )
+}
+
+# ============================================================
+# PART 4
+# Wide -> Long
+# ============================================================
+
+# ------------------------------------------------------------
+# Convert abundance table
+# ------------------------------------------------------------
+bracken_long <- bracken_top10 %>%
+  pivot_longer(
+    cols = all_of(shared_samples),
+    names_to = "Sample",
+    values_to = "Abundance"
+  ) %>%
+  mutate(
+    Abundance = as.numeric(Abundance)
+  )
+
+# ------------------------------------------------------------
+# Add age
+# ------------------------------------------------------------
+cor_dat <- bracken_long %>%
+  left_join(
+    meta_hainan %>%
+      select(
+        Sample,
+        Age
+      ),
+    by = "Sample"
+  ) %>%
+  filter(
+    !is.na(Age),
+    !is.na(Abundance)
+  )
+
+
+# ============================================================
+# PART 5
+# Spearman correlation
+# ============================================================
+
+# ------------------------------------------------------------
+#  Spearman
+# ------------------------------------------------------------
+cor_results <- cor_dat %>%
+  group_by(
+    Species,
+    Species_key
+  ) %>%
+  group_modify(
+    ~ {
+      
+      n_valid <- nrow(.x)
+      
+      n_unique <- n_distinct(
+        .x$Abundance
+      )
+      
+      # 如果丰度完全没有变化，无法计算 Spearman
+      if (
+        n_valid < 3 ||
+        n_unique < 2
+      ) {
+        
+        return(
+          tibble(
+            n = n_valid,
+            n_unique = n_unique,
+            rho = NA_real_,
+            p = NA_real_
+          )
+        )
+      }
+      
+      test <- suppressWarnings(
+        cor.test(
+          .x$Abundance,
+          .x$Age,
+          method = "spearman",
+          exact = FALSE
+        )
+      )
+      
+      tibble(
+        n = n_valid,
+        n_unique = n_unique,
+        rho = unname(
+          test$estimate
+        ),
+        p = test$p.value
+      )
+    }
+  ) %>%
+  ungroup()
+
+# ------------------------------------------------------------
+# FDR
+# ------------------------------------------------------------
+cor_results <- cor_results %>%
+  mutate(
+    FDR = p.adjust(
+      p,
+      method = "BH"
+    )
+  )
+
+# ------------------------------------------------------------
+#  Recover RF species names
+# ------------------------------------------------------------
+name_map <- hainan_top10 %>%
+  transmute(
+    Species_key,
+    Species_display = Species
+  )
+
+cor_results <- cor_results %>%
+  left_join(
+    name_map,
+    by = "Species_key"
+  )
+
+# ------------------------------------------------------------
+#  Direction and significance
+# ------------------------------------------------------------
+cor_results <- cor_results %>%
+  mutate(
+    
+    Direction = case_when(
+      rho > 0 ~ "Positive",
+      rho < 0 ~ "Negative",
+      TRUE ~ "Zero"
+    ),
+    
+    Significance = case_when(
+      !is.na(p) & p < 0.05 ~ "P < 0.05",
+      TRUE ~ "NS"
+    )
+    
+  ) %>%
+  arrange(
+    desc(rho)
+  )
+
+# ------------------------------------------------------------
+#  Print results
+# ------------------------------------------------------------
+cat("\n========================================\n")
+cat("SPEARMAN RESULTS\n")
+cat("========================================\n")
+
+print(
+  cor_results %>%
+    select(
+      Species_display,
+      Species,
+      n,
+      n_unique,
+      rho,
+      p,
+      FDR,
+      Direction,
+      Significance
+    ),
+  n = Inf
+)
+
+cat(
+  "\nNumber of species in correlation result =",
+  nrow(cor_results),
+  "\n"
+)
+
+# PART 6
+# Plot - horizontal bar plot
+# ============================================================
+
+# ------------------------------------------------------------
+#  Colors
+# ------------------------------------------------------------
+col_positive <- "#4F8F83"
+col_negative <- "#C8C8C8"
+col_sig <- "#B85C5C"
+col_ns_border <- NA
+
+# ------------------------------------------------------------
+#  Prepare plotting data
+#    按 rho 从大到小排序，图上从上到下显示
+# ------------------------------------------------------------
+plot_df <- cor_results %>%
+  filter(!is.na(rho)) %>%
+  arrange(desc(rho)) %>%
+  mutate(
+    Species_display = factor(
+      Species_display,
+      levels = rev(Species_display)
+    ),
+    
+    FillGroup = ifelse(rho >= 0, "Positive", "Negative"),
+    
+    BorderGroup = ifelse(p < 0.05, "Significant", "NS"),
+    
+    label_hjust = ifelse(rho >= 0, -0.12, 1.12)
+  )
+
+cat(
+  "\nNumber of species actually plotted =",
+  nrow(plot_df),
+  "\n"
+)
+
+# ------------------------------------------------------------
+#  X-axis range
+# ------------------------------------------------------------
+xmin <- min(plot_df$rho, na.rm = TRUE)
+xmax <- max(plot_df$rho, na.rm = TRUE)
+
+x_left  <- min(-0.62, xmin - 0.06)
+x_right <- max(0.48, xmax + 0.08)
+
+# ------------------------------------------------------------
+# Plot
+# ------------------------------------------------------------
+p_age_cor_bar <- ggplot(
+  plot_df,
+  aes(
+    x = rho,
+    y = Species_display
+  )
+) +
+  
+  # 0 参考线
+  geom_vline(
+    xintercept = 0,
+    color = "black",
+    linewidth = 1.2
+  ) +
+  
+  # 主柱子
+  geom_col(
+    aes(
+      fill = FillGroup,
+      color = BorderGroup
+    ),
+    width = 0.62,
+    linewidth = 1.1
+  ) +
+  
+  # 数值标签
+  geom_text(
+    aes(
+      label = sprintf("%.2f", rho),
+      hjust = label_hjust
+    ),
+    family = "Arial",
+    fontface = "bold",
+    size = 4.2,
+    color = "black"
+  ) +
+  
+  # 填充颜色
+  scale_fill_manual(
+    values = c(
+      "Positive" = col_positive,
+      "Negative" = col_negative
+    ),
+    guide = "none"
+  ) +
+  
+  # 边框颜色
+  scale_color_manual(
+    values = c(
+      "Significant" = col_sig,
+      "NS" = "black"
+    ),
+    guide = "none"
+  ) +
+  
+  # 横坐标
+  scale_x_continuous(
+    limits = c(x_left, x_right),
+    breaks = c(-0.6, -0.3, 0, 0.3),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  
+  labs(
+    x = "Spearman ρ",
+    y = NULL
+  ) +
+  
+  theme_classic(
+    base_family = "Arial"
+  ) +
+  
+  theme(
+    text = element_text(
+      family = "Arial",
+      face = "bold",
+      color = "black"
+    ),
+    
+    axis.title.x = element_text(
+      size = 16,
+      face = "bold",
+      margin = margin(t = 10)
+    ),
+    
+    axis.text.x = element_text(
+      size = 12,
+      face = "bold",
+      color = "black"
+    ),
+    
+    axis.text.y = element_text(
+      size = 11,
+      face = "bold",
+      color = "black"
+    ),
+    
+    axis.line = element_blank(),
+    
+    axis.ticks = element_line(
+      color = "black",
+      linewidth = 1
+    ),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    # 正方形
+    aspect.ratio = 1,
+    
+    plot.margin = margin(
+      10, 18, 10, 10
+    )
+  ) +
+  
+  coord_cartesian(
+    clip = "off"
+  )
+
+# ------------------------------------------------------------
+# Show
+# ------------------------------------------------------------
+p_age_cor_bar
