@@ -1,0 +1,479 @@
+# ============================================================
+# Fig.4C
+# Random Forest species importance
+# Hainan / Sardinia / Emilia Romagna
+# ============================================================
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(ggtext)
+library(grid)
+
+# -----------------------------------------------------------
+# File path
+# ------------------------------------------------------------
+rf_file <- paste0(
+  "C:/Users/Administrator/Desktop/长寿老人/长寿老人/",
+  "老人-宏基因组/地区之间的比较—确定年龄分组/",
+  "RF结果.xlsx"
+)
+
+# ------------------------------------------------------------
+# Read sheets
+# ------------------------------------------------------------
+rf_hainan <- read_excel(
+  rf_file,
+  sheet = "Hainan_rank"
+)
+
+rf_sardinia <- read_excel(
+  rf_file,
+  sheet = "Sardinia_rank"
+)
+
+rf_emilia <- read_excel(
+  rf_file,
+  sheet = "Emilia_rank"
+)
+
+# ------------------------------------------------------------
+# Parameters
+# ------------------------------------------------------------
+
+# Target species
+target_species <- "Bifidobacterium.adolescentis"
+
+# Colors
+col_normal <- "#8E8E8E"
+col_target <- "#B85C5C"
+
+# Numeric label colors
+col_num_normal <- "black"
+col_num_target <- "#B85C5C"
+
+# Final number of species per panel
+top_n <- 10
+
+# ------------------------------------------------------------
+# Species manually removed
+#
+
+# ------------------------------------------------------------
+# Prepare function
+# ------------------------------------------------------------
+prepare_rf <- function(
+    df,
+    top_n = 10
+) {
+  
+  # ----------------------------------------------------------
+  # Basic cleaning
+  # ----------------------------------------------------------
+  df <- df %>%
+    mutate(
+      Test_region = as.character(Test_region),
+      Species = as.character(Species),
+      Rank = as.numeric(Rank),
+      MeanDecreaseGini = as.numeric(MeanDecreaseGini)
+    ) %>%
+    filter(
+      !is.na(Species),
+      Species != "",
+      !is.na(MeanDecreaseGini)
+    )
+  
+  # ----------------------------------------------------------
+  # Manually remove selected species
+  # ----------------------------------------------------------
+  df <- df %>%
+    filter(
+      !Species %in% manual_remove_species
+    )
+  
+  # ----------------------------------------------------------
+  # Rank by MeanDecreaseGini
+  # ----------------------------------------------------------
+  df <- df %>%
+    arrange(
+      desc(MeanDecreaseGini)
+    )
+  
+  # ----------------------------------------------------------
+  # Select Top10
+  # ----------------------------------------------------------
+  top_df <- df %>%
+    slice_head(
+      n = top_n
+    )
+  
+  # ----------------------------------------------------------
+  # Find B. adolescentis
+  # ----------------------------------------------------------
+  ba_row <- df %>%
+    filter(
+      Species == target_species
+    )
+  
+  # ----------------------------------------------------------
+  # If B. adolescentis is not in Top10:
+  # keep Top9 + B. adolescentis
+  #
+  # Final number remains 10
+  # ----------------------------------------------------------
+  if (
+    nrow(ba_row) > 0 &&
+    !(target_species %in% top_df$Species)
+  ) {
+    
+    top_df <- bind_rows(
+      df %>%
+        slice_head(
+          n = top_n - 1
+        ),
+      ba_row
+    ) %>%
+      distinct(
+        Species,
+        .keep_all = TRUE
+      )
+  }
+  
+  # ----------------------------------------------------------
+  # Highlight target species
+  # ----------------------------------------------------------
+  top_df <- top_df %>%
+    mutate(
+      
+      Highlight = ifelse(
+        Species == target_species,
+        "Target",
+        "Other"
+      ),
+      
+      Species_display = ifelse(
+        Species == target_species,
+        paste0(
+          "<span style='color:",
+          col_target,
+          ";'>",
+          Species,
+          "</span>"
+        ),
+        Species
+      )
+      
+    ) %>%
+    
+    # Small value at bottom,
+    # large value at top
+    arrange(
+      MeanDecreaseGini
+    ) %>%
+    
+    mutate(
+      Species_display = factor(
+        Species_display,
+        levels = Species_display
+      )
+    )
+  
+  return(top_df)
+}
+
+# ------------------------------------------------------------
+# Prepare data
+# ------------------------------------------------------------
+hainan_top <- prepare_rf(
+  rf_hainan,
+  top_n
+)
+
+sardinia_top <- prepare_rf(
+  rf_sardinia,
+  top_n
+)
+
+emilia_top <- prepare_rf(
+  rf_emilia,
+  top_n
+)
+
+# ------------------------------------------------------------
+# Check final species
+# ------------------------------------------------------------
+
+cat("\n================ Hainan ================\n")
+print(
+  hainan_top %>%
+    select(
+      Species,
+      MeanDecreaseGini
+    ),
+  n = Inf
+)
+
+cat("\n================ Sardinia ================\n")
+print(
+  sardinia_top %>%
+    select(
+      Species,
+      MeanDecreaseGini
+    ),
+  n = Inf
+)
+
+cat("\n================ Emilia Romagna ================\n")
+print(
+  emilia_top %>%
+    select(
+      Species,
+      MeanDecreaseGini
+    ),
+  n = Inf
+)
+
+
+# ------------------------------------------------------------
+# Plot function
+# ------------------------------------------------------------
+make_rf_plot <- function(
+    df,
+    title_text
+) {
+  
+  # 给右边数字留空间
+  xmax <- max(
+    df$MeanDecreaseGini,
+    na.rm = TRUE
+  ) * 1.22
+  
+  ggplot(
+    df,
+    aes(
+      x = MeanDecreaseGini,
+      y = Species_display
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Lollipop segments
+  # --------------------------------------------------------
+  geom_segment(
+    aes(
+      x = 0,
+      xend = MeanDecreaseGini,
+      y = Species_display,
+      yend = Species_display,
+      color = Highlight
+    ),
+    linewidth = 1.5,
+    alpha = 0.95
+  ) +
+    
+    # --------------------------------------------------------
+  # Points
+  # --------------------------------------------------------
+  geom_point(
+    aes(
+      color = Highlight
+    ),
+    size = 4.2
+  ) +
+    
+    # --------------------------------------------------------
+  # Normal species values
+  # --------------------------------------------------------
+  geom_text(
+    data = df %>%
+      filter(
+        Highlight == "Other"
+      ),
+    aes(
+      label = sprintf(
+        "%.2f",
+        MeanDecreaseGini
+      )
+    ),
+    hjust = -0.32,
+    size = 4.2,
+    family = "Arial",
+    fontface = "bold",
+    color = col_num_normal,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # B. adolescentis value
+  # --------------------------------------------------------
+  geom_text(
+    data = df %>%
+      filter(
+        Highlight == "Target"
+      ),
+    aes(
+      label = sprintf(
+        "%.2f",
+        MeanDecreaseGini
+      )
+    ),
+    hjust = -0.32,
+    size = 4.25,
+    family = "Arial",
+    fontface = "bold",
+    color = col_num_target,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # Colors
+  # --------------------------------------------------------
+  scale_color_manual(
+    values = c(
+      "Other" = col_normal,
+      "Target" = col_target
+    ),
+    guide = "none"
+  ) +
+    
+    # --------------------------------------------------------
+  # X axis
+  # --------------------------------------------------------
+  scale_x_continuous(
+    limits = c(
+      0,
+      xmax
+    ),
+    expand = expansion(
+      mult = c(
+        0,
+        0
+      )
+    )
+  ) +
+    
+    coord_cartesian(
+      clip = "off"
+    ) +
+    
+    # --------------------------------------------------------
+  # Labels
+  # --------------------------------------------------------
+  labs(
+    title = title_text,
+    x = "Mean Decrease Gini",
+    y = NULL
+  ) +
+    
+    # --------------------------------------------------------
+  # Theme
+  # --------------------------------------------------------
+  theme_classic(
+    base_family = "Arial"
+  ) +
+    
+    theme(
+      
+      text = element_text(
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      plot.title = element_text(
+        size = 20,
+        hjust = 0.5,
+        margin = margin(
+          b = 10
+        )
+      ),
+      
+      axis.title.x = element_text(
+        size = 16,
+        margin = margin(
+          t = 10
+        )
+      ),
+      
+      axis.text.x = element_text(
+        size = 12,
+        color = "black"
+      ),
+      
+      axis.text.y = ggtext::element_markdown(
+        size = 11,
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      axis.line = element_blank(),
+      
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 1.5
+      ),
+      
+      axis.ticks = element_line(
+        color = "black",
+        linewidth = 1
+      ),
+      
+      plot.margin = margin(
+        10,
+        28,
+        10,
+        10
+      )
+    )
+}
+
+# ------------------------------------------------------------
+# Draw plots
+# ------------------------------------------------------------
+p_rf_H <- make_rf_plot(
+  hainan_top,
+  "Hainan"
+)
+
+p_rf_S <- make_rf_plot(
+  sardinia_top,
+  "Sardinia"
+)
+
+p_rf_E <- make_rf_plot(
+  emilia_top,
+  "Emilia Romagna"
+)
+
+# ------------------------------------------------------------
+#  Combine
+# ------------------------------------------------------------
+p_fig4C <- p_rf_H +
+  p_rf_S +
+  p_rf_E +
+  plot_layout(
+    ncol = 3
+  )
+
+# ------------------------------------------------------------
+#  Show
+# ------------------------------------------------------------
+p_fig4C
+
+# ------------------------------------------------------------
+#  Export PDF
+# Arial
+# NO showtext
+# ------------------------------------------------------------
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig3F_RF_importance_Top10_Arial.pdf",
+  plot = p_fig4C,
+  width = 16,
+  height = 7,
+  units = "in",
+  device = cairo_pdf,
+  bg = "white"
+)
