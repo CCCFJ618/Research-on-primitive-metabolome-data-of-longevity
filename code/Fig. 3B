@@ -1,0 +1,363 @@
+# ============================================================
+# Fig.3B
+# KEGG enrichment bubble plot of longevity-enriched KOs
+#
+
+# ============================================================
+
+library(dplyr)
+library(ggplot2)
+library(ggtext)
+library(grid)
+
+
+# ------------------------------------------------------------
+# Define highly sugar-related pathways
+#
+# These pathways are retained even when P >= 0.05
+# ------------------------------------------------------------
+
+target_pathways <- c(
+  "map00010",  # Glycolysis / Gluconeogenesis
+  "map00051",  # Fructose and mannose metabolism
+  "map00500",  # Starch and sucrose metabolism
+  "map00520",  # Amino sugar and nucleotide sugar metabolism
+  "map00040",  # Pentose and glucuronate interconversions
+  "map02060"   # Phosphotransferase system (PTS)
+)
+
+# ------------------------------------------------------------
+#  Clean kegg_up
+# ------------------------------------------------------------
+
+kegg_df <- kegg_up %>%
+  mutate(
+    pathway_id = as.character(pathway_id),
+    pathway_name = as.character(pathway_name),
+    foreground_count = as.numeric(foreground_count),
+    background_count = as.numeric(background_count),
+    p = as.numeric(p),
+    FDR = as.numeric(FDR),
+    GeneRatio = as.numeric(GeneRatio),
+    BgRatio = as.numeric(BgRatio),
+    FoldEnrichment = as.numeric(FoldEnrichment),
+    neglog10P = -log10(p)
+  ) %>%
+  filter(
+    !is.na(pathway_id),
+    !is.na(pathway_name),
+    !is.na(foreground_count),
+    !is.na(p),
+    !is.na(GeneRatio),
+    p > 0
+  )
+
+# ------------------------------------------------------------
+#  Keep ALL significant pathways
+# ------------------------------------------------------------
+
+sig_df <- kegg_df %>%
+  filter(p < 0.05)
+
+# ------------------------------------------------------------
+# Keep sugar-related pathways
+#    even if they are not significant
+# ------------------------------------------------------------
+
+target_df <- kegg_df %>%
+  filter(pathway_id %in% target_pathways)
+
+# ------------------------------------------------------------
+#  Combine
+#
+# Result:
+# significant pathways
+# +
+# strongly sugar-related pathways
+# ------------------------------------------------------------
+
+plot_df <- bind_rows(
+  sig_df,
+  target_df
+) %>%
+  distinct(
+    pathway_id,
+    .keep_all = TRUE
+  )
+
+# ------------------------------------------------------------
+# Mark sugar-related pathways
+#    Red text
+# ------------------------------------------------------------
+
+plot_df <- plot_df %>%
+  mutate(
+    is_target = pathway_id %in% target_pathways,
+    
+    pathway_display = ifelse(
+      is_target,
+      paste0(
+        "<span style='color:#B85C5C;'>",
+        pathway_name,
+        "</span>"
+      ),
+      pathway_name
+    )
+  )
+
+# ------------------------------------------------------------
+#  Sort pathways
+# ------------------------------------------------------------
+
+plot_df <- plot_df %>%
+  arrange(
+    desc(is_target),
+    p,
+    desc(foreground_count),
+    desc(GeneRatio)
+  ) %>%
+  mutate(
+    pathway_display = factor(
+      pathway_display,
+      levels = rev(
+        unique(pathway_display)
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+#  Colors
+# ------------------------------------------------------------
+
+highlight_red <- "#B85C5C"
+
+color_low  <- "#A7CEC8"
+color_high <- highlight_red
+
+# ------------------------------------------------------------
+#  Plot
+# ------------------------------------------------------------
+
+p_kegg_up <- ggplot(
+  plot_df,
+  aes(
+    x = GeneRatio,
+    y = pathway_display
+  )
+) +
+  
+  geom_point(
+    aes(
+      size = foreground_count,
+      color = neglog10P
+    ),
+    alpha = 0.92
+  ) +
+  
+  # --------------------------------------------------------
+# Bubble size
+# --------------------------------------------------------
+
+scale_size_continuous(
+  name = "Count",
+  range = c(4.2, 10.5),
+  breaks = sort(
+    unique(
+      plot_df$foreground_count
+    )
+  )
+) +
+  
+  # --------------------------------------------------------
+# Color
+# --------------------------------------------------------
+
+scale_color_gradient(
+  name = expression(
+    -log[10]~"(P value)"
+  ),
+  low = color_low,
+  high = color_high
+) +
+  
+  # --------------------------------------------------------
+# X axis
+# --------------------------------------------------------
+
+scale_x_continuous(
+  expand = expansion(
+    mult = c(
+      0.10,
+      0.18
+    )
+  )
+) +
+  
+  labs(
+    x = "Gene ratio",
+    y = NULL
+  ) +
+  
+  # --------------------------------------------------------
+# Theme
+# --------------------------------------------------------
+
+theme_classic(
+  base_family = "Arial",
+  base_size = 14
+) +
+  
+  theme(
+    
+    text = element_text(
+      family = "Arial",
+      face = "bold",
+      color = "black"
+    ),
+    
+    # ------------------------------------------------------
+    # X axis title
+    # ------------------------------------------------------
+    
+    axis.title.x = element_text(
+      family = "Arial",
+      size = 18,
+      face = "bold",
+      margin = margin(t = 8)
+    ),
+    
+    # ------------------------------------------------------
+    # X axis labels
+    # ------------------------------------------------------
+    
+    axis.text.x = element_text(
+      family = "Arial",
+      size = 13,
+      face = "bold",
+      color = "black"
+    ),
+    
+    # ------------------------------------------------------
+    # Pathway names
+    # ------------------------------------------------------
+    
+    axis.text.y = ggtext::element_markdown(
+      family = "Arial",
+      size = 11.5,
+      face = "bold",
+      color = "black"
+    ),
+    
+    axis.line = element_blank(),
+    
+    # ------------------------------------------------------
+    # Axis ticks
+    # ------------------------------------------------------
+    
+    axis.ticks = element_line(
+      linewidth = 1.0,
+      color = "black"
+    ),
+    
+    axis.ticks.length = unit(
+      0.16,
+      "cm"
+    ),
+    
+    # ------------------------------------------------------
+    # Border
+    # ------------------------------------------------------
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    # ------------------------------------------------------
+    # Legend
+    # ------------------------------------------------------
+    
+    legend.title = element_text(
+      family = "Arial",
+      size = 13,
+      face = "bold",
+      color = "black"
+    ),
+    
+    legend.text = element_text(
+      family = "Arial",
+      size = 11,
+      face = "bold",
+      color = "black"
+    ),
+    
+    legend.key.height = unit(
+      0.55,
+      "cm"
+    ),
+    
+    legend.key.width = unit(
+      0.55,
+      "cm"
+    ),
+    
+    legend.spacing.y = unit(
+      0.15,
+      "cm"
+    ),
+    
+    # ------------------------------------------------------
+    # Margin
+    # ------------------------------------------------------
+    
+    plot.margin = margin(
+      t = 8,
+      r = 16,
+      b = 8,
+      l = 8
+    )
+  ) +
+  
+  guides(
+    
+    size = guide_legend(
+      order = 1,
+      override.aes = list(
+        alpha = 1
+      )
+    ),
+    
+    color = guide_colorbar(
+      order = 2,
+      barheight = unit(
+        3.0,
+        "cm"
+      ),
+      barwidth = unit(
+        0.45,
+        "cm"
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+# 11. Show
+# ------------------------------------------------------------
+
+p_kegg_up
+
+# ------------------------------------------------------------
+# 12. Export PDF
+#     Cairo PDF
+#     showtext is OFF
+# ------------------------------------------------------------
+
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig2F_KO_UP_KEGG_bubble.pdf",
+  plot = p_kegg_up,
+  width = 8.5,
+  height = 7.0,
+  units = "in",
+  device = cairo_pdf
+)
