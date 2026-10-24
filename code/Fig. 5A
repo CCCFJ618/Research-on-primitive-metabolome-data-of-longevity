@@ -1,0 +1,1426 @@
+# ============================================================
+# Fig.5A FINAL ARCHIVE VERSION
+# Bifidobacterium adolescentis ATCC 15703
+#
+# Circular genome map highlighting GH13-related CAZymes
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 0. Clear environment
+# ------------------------------------------------------------
+rm(list = ls())
+
+
+# ------------------------------------------------------------
+# 1. Packages
+# ------------------------------------------------------------
+library(dplyr)
+library(stringr)
+library(readr)
+library(Biostrings)
+library(circlize)
+
+
+# ------------------------------------------------------------
+# 2. Make sure showtext is OFF
+# ------------------------------------------------------------
+if ("showtext" %in% loadedNamespaces()) {
+  showtext::showtext_auto(FALSE)
+}
+
+
+# ------------------------------------------------------------
+# 3. Input files
+# ------------------------------------------------------------
+gff_file <- paste0(
+  "D:/肾病切片/ncbi_dataset/data/",
+  "GCF_000010425.1/genomic.gff"
+)
+
+fna_file <- paste0(
+  "D:/肾病切片/ncbi_dataset/data/",
+  "GCF_000010425.1/",
+  "GCF_000010425.1_ASM1042v1_genomic.fna"
+)
+
+
+# ------------------------------------------------------------
+# 4. Read GFF
+# ------------------------------------------------------------
+gff <- readr::read_tsv(
+  gff_file,
+  comment = "#",
+  col_names = c(
+    "seqid",
+    "source",
+    "type",
+    "start",
+    "end",
+    "score",
+    "strand",
+    "phase",
+    "attributes"
+  ),
+  show_col_types = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 5. Genome information
+# ------------------------------------------------------------
+genome_region <- gff %>%
+  dplyr::filter(type == "region") %>%
+  dplyr::slice(1)
+
+genome_id <- genome_region$seqid[1]
+
+genome_start <- as.numeric(
+  genome_region$start[1]
+)
+
+genome_end <- as.numeric(
+  genome_region$end[1]
+)
+
+genome_length <-
+  genome_end -
+  genome_start +
+  1
+
+cat(
+  "Genome ID:",
+  genome_id,
+  "\n"
+)
+
+cat(
+  "Genome length:",
+  genome_length,
+  "bp\n"
+)
+
+
+# ------------------------------------------------------------
+# 6. Extract CDS information
+# ------------------------------------------------------------
+cds <- gff %>%
+  dplyr::filter(type == "CDS") %>%
+  dplyr::mutate(
+    
+    protein_id =
+      stringr::str_extract(
+        attributes,
+        "protein_id=[^;]+"
+      ),
+    
+    protein_id =
+      stringr::str_remove(
+        protein_id,
+        "protein_id="
+      ),
+    
+    gene =
+      stringr::str_extract(
+        attributes,
+        "gene=[^;]+"
+      ),
+    
+    gene =
+      stringr::str_remove(
+        gene,
+        "gene="
+      ),
+    
+    locus_tag =
+      stringr::str_extract(
+        attributes,
+        "locus_tag=[^;]+"
+      ),
+    
+    locus_tag =
+      stringr::str_remove(
+        locus_tag,
+        "locus_tag="
+      ),
+    
+    product =
+      stringr::str_extract(
+        attributes,
+        "product=[^;]+"
+      ),
+    
+    product =
+      stringr::str_remove(
+        product,
+        "product="
+      ),
+    
+    start =
+      as.numeric(start),
+    
+    end =
+      as.numeric(end)
+  )
+
+
+# ------------------------------------------------------------
+# 7. Forward / Reverse CDS
+# ------------------------------------------------------------
+cds_forward <- cds %>%
+  dplyr::filter(
+    strand == "+"
+  )
+
+cds_reverse <- cds %>%
+  dplyr::filter(
+    strand == "-"
+  )
+
+
+# ============================================================
+# 8. GH13 annotation
+# Based on dbCAN results
+# ============================================================
+gh13_info <- tibble::tibble(
+  
+  protein_id = c(
+    "WP_011742626.1",
+    "WP_011743089.1",
+    "WP_011743102.1",
+    "WP_011743122.1",
+    "WP_011743123.1",
+    "WP_011743335.1",
+    "WP_011743857.1",
+    "WP_011743867.1",
+    "WP_050731445.1"
+  ),
+  
+  family = c(
+    "GH13_18",
+    "GH13_9",
+    "GH13_11",
+    "GH13_32",
+    "GH13_32 / GH13_14",
+    "GH13_30",
+    "GH13_14",
+    "GH13_31",
+    "GH13_30"
+  ),
+  
+  substrate = c(
+    "Sucrose",
+    "Alpha-glucan",
+    "Alpha-glucan",
+    "Alpha-glucan",
+    "Alpha-glucan",
+    "Alpha-glucan",
+    "Alpha-glucan",
+    "Alpha-glucan / Sucrose",
+    "Alpha-glucan"
+  )
+)
+
+
+# ------------------------------------------------------------
+# 9. Match GH13 proteins to genome coordinates
+# ------------------------------------------------------------
+gh13_genes <- cds %>%
+  dplyr::inner_join(
+    gh13_info,
+    by = "protein_id"
+  ) %>%
+  dplyr::arrange(start)
+
+
+# ------------------------------------------------------------
+# 10. Check matching
+# ------------------------------------------------------------
+print(
+  gh13_genes %>%
+    dplyr::select(
+      protein_id,
+      family,
+      substrate,
+      start,
+      end,
+      strand,
+      locus_tag,
+      product
+    )
+)
+
+
+# ============================================================
+# 11. Color palette
+# ============================================================
+
+col_backbone <- "#D5D5D5"
+
+col_gh13 <- "#3F73B9"
+col_sucrose <- "#C65A5A"
+
+col_forward <- "#4F4F4F"
+col_reverse <- "#B8B8B8"
+
+col_gc_pos <- "#8A6F5A"
+col_gc_neg <- "#D8CEC6"
+
+col_skew_pos <- "#788A99"
+col_skew_neg <- "#D4DDE3"
+
+
+# ============================================================
+# 12. Prepare GH13 marker positions
+# ============================================================
+gh13_genes <- gh13_genes %>%
+  dplyr::mutate(
+    
+    gene_color =
+      dplyr::if_else(
+        protein_id ==
+          "WP_011742626.1",
+        col_sucrose,
+        col_gh13
+      ),
+    
+    marker_start =
+      dplyr::if_else(
+        
+        protein_id ==
+          "WP_011742626.1",
+        
+        pmax(
+          start - 12000,
+          genome_start
+        ),
+        
+        pmax(
+          start - 7000,
+          genome_start
+        )
+      ),
+    
+    marker_end =
+      dplyr::if_else(
+        
+        protein_id ==
+          "WP_011742626.1",
+        
+        pmin(
+          end + 12000,
+          genome_end
+        ),
+        
+        pmin(
+          end + 7000,
+          genome_end
+        )
+      ),
+    
+    mid =
+      (
+        start +
+          end
+      ) / 2
+  )
+
+
+# ============================================================
+# 13. GH13 label text
+# ============================================================
+gh13_genes <- gh13_genes %>%
+  dplyr::mutate(
+    
+    plot_label =
+      dplyr::case_when(
+        
+        protein_id ==
+          "WP_011742626.1" ~
+          "GH13_18\nSucrose phosphorylase",
+        
+        protein_id ==
+          "WP_011743123.1" ~
+          "GH13_32 /\nGH13_14",
+        
+        TRUE ~
+          family
+      )
+  )
+
+
+# ============================================================
+# 14. FINAL label positions
+# ============================================================
+gh13_genes <- gh13_genes %>%
+  dplyr::mutate(
+    
+    label_x =
+      dplyr::case_when(
+        
+        protein_id ==
+          "WP_011742626.1" ~
+          mid,
+        
+        protein_id ==
+          "WP_011743089.1" ~
+          mid - 125000,
+        
+        protein_id ==
+          "WP_011743102.1" ~
+          mid - 55000,
+        
+        protein_id ==
+          "WP_011743122.1" ~
+          mid + 45000,
+        
+        protein_id ==
+          "WP_011743123.1" ~
+          mid + 130000,
+        
+        protein_id ==
+          "WP_011743335.1" ~
+          mid,
+        
+        protein_id ==
+          "WP_011743857.1" ~
+          mid - 25000,
+        
+        protein_id ==
+          "WP_011743867.1" ~
+          mid + 30000,
+        
+        protein_id ==
+          "WP_050731445.1" ~
+          mid,
+        
+        TRUE ~
+          mid
+      ),
+    
+    label_x =
+      pmax(
+        genome_start,
+        pmin(
+          label_x,
+          genome_end
+        )
+      ),
+    
+    label_y =
+      dplyr::case_when(
+        
+        protein_id ==
+          "WP_011742626.1" ~
+          1.25,
+        
+        protein_id ==
+          "WP_011743089.1" ~
+          1.16,
+        
+        protein_id ==
+          "WP_011743102.1" ~
+          1.29,
+        
+        protein_id ==
+          "WP_011743122.1" ~
+          1.17,
+        
+        protein_id ==
+          "WP_011743123.1" ~
+          1.31,
+        
+        protein_id ==
+          "WP_011743335.1" ~
+          1.13,
+        
+        protein_id ==
+          "WP_011743857.1" ~
+          1.13,
+        
+        protein_id ==
+          "WP_011743867.1" ~
+          1.26,
+        
+        protein_id ==
+          "WP_050731445.1" ~
+          1.15,
+        
+        TRUE ~
+          1.15
+      )
+  )
+
+
+# ============================================================
+# 15. Read genome FASTA
+# ============================================================
+dna <- Biostrings::readDNAStringSet(
+  fna_file
+)
+
+seq_chr <- dna[[1]]
+
+cat(
+  "FASTA length:",
+  length(seq_chr),
+  "\n"
+)
+
+
+# ------------------------------------------------------------
+# 16. Check genome length
+# ------------------------------------------------------------
+if (
+  length(seq_chr) !=
+  genome_length
+) {
+  
+  warning(
+    paste0(
+      "FASTA length = ",
+      length(seq_chr),
+      "; GFF length = ",
+      genome_length
+    )
+  )
+}
+
+
+# ============================================================
+# 17. Calculate GC content and GC skew
+# ============================================================
+
+window_size <- 20000
+step_size <- 10000
+
+starts <- seq(
+  from = 1,
+  to =
+    genome_length -
+    window_size +
+    1,
+  by = step_size
+)
+
+gc_list <- lapply(
+  
+  starts,
+  
+  function(st) {
+    
+    en <-
+      min(
+        st +
+          window_size -
+          1,
+        genome_length
+      )
+    
+    fragment <-
+      Biostrings::subseq(
+        seq_chr,
+        start = st,
+        end = en
+      )
+    
+    counts <-
+      Biostrings::alphabetFrequency(
+        fragment,
+        baseOnly = TRUE
+      )
+    
+    A <- as.numeric(counts["A"])
+    C <- as.numeric(counts["C"])
+    G <- as.numeric(counts["G"])
+    T <- as.numeric(counts["T"])
+    
+    total <-
+      A +
+      C +
+      G +
+      T
+    
+    gc_content <-
+      ifelse(
+        total == 0,
+        NA,
+        (G + C) /
+          total
+      )
+    
+    gc_skew <-
+      ifelse(
+        (G + C) == 0,
+        0,
+        (G - C) /
+          (G + C)
+      )
+    
+    data.frame(
+      
+      start = st,
+      
+      end = en,
+      
+      mid =
+        (
+          st +
+            en
+        ) / 2,
+      
+      gc_content =
+        gc_content,
+      
+      gc_skew =
+        gc_skew
+    )
+  }
+)
+
+gc_df <-
+  dplyr::bind_rows(
+    gc_list
+  )
+
+
+# ------------------------------------------------------------
+# 18. Center GC content
+# ------------------------------------------------------------
+mean_gc <- mean(
+  gc_df$gc_content,
+  na.rm = TRUE
+)
+
+gc_df <- gc_df %>%
+  dplyr::mutate(
+    gc_centered =
+      gc_content -
+      mean_gc
+  )
+
+
+# ------------------------------------------------------------
+# 19. Rescale helper
+# ------------------------------------------------------------
+rescale01 <- function(x) {
+  
+  r <- range(
+    x,
+    na.rm = TRUE
+  )
+  
+  if (
+    !all(is.finite(r)) ||
+    diff(r) == 0
+  ) {
+    
+    return(
+      rep(
+        0.5,
+        length(x)
+      )
+    )
+  }
+  
+  (
+    x -
+      r[1]
+  ) /
+    diff(r)
+}
+
+
+gc_df <- gc_df %>%
+  dplyr::mutate(
+    
+    gc_scaled =
+      rescale01(
+        gc_centered
+      ),
+    
+    skew_scaled =
+      rescale01(
+        gc_skew
+      )
+  )
+
+
+# ============================================================
+# 20. CDS drawing helper
+# ============================================================
+draw_cds_track <- function(
+    df,
+    fill_col
+) {
+  
+  if (
+    nrow(df) ==
+    0
+  ) {
+    
+    return(
+      invisible(NULL)
+    )
+  }
+  
+  for (
+    i in seq_len(
+      nrow(df)
+    )
+  ) {
+    
+    circlize::circos.rect(
+      
+      xleft =
+        df$start[i],
+      
+      ybottom =
+        0.13,
+      
+      xright =
+        df$end[i],
+      
+      ytop =
+        0.87,
+      
+      col =
+        fill_col,
+      
+      border =
+        NA
+    )
+  }
+}
+
+
+# ============================================================
+# 21. Outer backbone + GH13 blocks
+# ============================================================
+draw_backbone_gh13 <- function(df) {
+  
+  circlize::circos.rect(
+    
+    xleft =
+      CELL_META$xlim[1],
+    
+    ybottom =
+      0.08,
+    
+    xright =
+      CELL_META$xlim[2],
+    
+    ytop =
+      0.92,
+    
+    col =
+      col_backbone,
+    
+    border =
+      "#B7B7B7",
+    
+    lwd =
+      0.7
+  )
+  
+  if (
+    nrow(df) ==
+    0
+  ) {
+    
+    return(
+      invisible(NULL)
+    )
+  }
+  
+  for (
+    i in seq_len(
+      nrow(df)
+    )
+  ) {
+    
+    is_sucrose <-
+      df$protein_id[i] ==
+      "WP_011742626.1"
+    
+    circlize::circos.rect(
+      
+      xleft =
+        df$marker_start[i],
+      
+      ybottom =
+        ifelse(
+          is_sucrose,
+          0.04,
+          0.10
+        ),
+      
+      xright =
+        df$marker_end[i],
+      
+      ytop =
+        ifelse(
+          is_sucrose,
+          0.96,
+          0.90
+        ),
+      
+      col =
+        df$gene_color[i],
+      
+      border =
+        ifelse(
+          is_sucrose,
+          "#873E3E",
+          NA
+        ),
+      
+      lwd =
+        ifelse(
+          is_sucrose,
+          1.3,
+          0.5
+        )
+    )
+  }
+}
+
+
+# ============================================================
+# 22. Main plot function
+# ============================================================
+plot_genome_circle <- function() {
+  
+  circlize::circos.clear()
+  
+  # ----------------------------------------------------------
+  # Arial for all base-graphics text,
+  # including legend
+  # ----------------------------------------------------------
+  graphics::par(
+    xpd = NA,
+    family = "Arial"
+  )
+  
+  circlize::circos.par(
+    
+    start.degree =
+      90,
+    
+    gap.degree =
+      0.8,
+    
+    track.margin =
+      c(
+        0.003,
+        0.003
+      ),
+    
+    cell.padding =
+      c(
+        0,
+        0,
+        0,
+        0
+      ),
+    
+    canvas.xlim =
+      c(
+        -1.55,
+        1.40
+      ),
+    
+    canvas.ylim =
+      c(
+        -1.50,
+        1.55
+      )
+  )
+  
+  # ----------------------------------------------------------
+  # Initialize genome
+  # ----------------------------------------------------------
+  circlize::circos.initialize(
+    
+    factors =
+      genome_id,
+    
+    xlim =
+      matrix(
+        c(
+          genome_start,
+          genome_end
+        ),
+        ncol = 2
+      )
+  )
+  
+  # ==========================================================
+  # TRACK 1
+  # Genome backbone + GH13 + labels
+  # ==========================================================
+  circlize::circos.trackPlotRegion(
+    
+    ylim =
+      c(
+        0,
+        1.66
+      ),
+    
+    track.height =
+      0.20,
+    
+    bg.border =
+      NA,
+    
+    panel.fun =
+      function(x, y) {
+        
+        df_tmp <-
+          gh13_genes %>%
+          dplyr::filter(
+            seqid ==
+              CELL_META$sector.index
+          )
+        
+        draw_backbone_gh13(
+          df_tmp
+        )
+        
+        # ====================================================
+        # Mb labels only
+        # ====================================================
+        ticks <- c(
+          0,
+          500000,
+          1000000,
+          1500000,
+          2000000
+        )
+        
+        tick_labels <- c(
+          "0 Mb",
+          "0.5 Mb",
+          "1 Mb",
+          "1.5 Mb",
+          "2 Mb"
+        )
+        
+        for (
+          j in seq_along(
+            ticks
+          )
+        ) {
+          
+          circlize::circos.text(
+            
+            x =
+              ticks[j],
+            
+            y =
+              1.53,
+            
+            labels =
+              tick_labels[j],
+            
+            facing =
+              "clockwise",
+            
+            niceFacing =
+              TRUE,
+            
+            cex =
+              0.48,
+            
+            family =
+              "Arial",
+            
+            font =
+              2,
+            
+            col =
+              "#222222"
+          )
+        }
+        
+        # ====================================================
+        # GH13 labels + leader lines
+        # ====================================================
+        if (
+          nrow(df_tmp) >
+          0
+        ) {
+          
+          for (
+            i in seq_len(
+              nrow(df_tmp)
+            )
+          ) {
+            
+            is_sucrose <-
+              df_tmp$protein_id[i] ==
+              "WP_011742626.1"
+            
+            circlize::circos.segments(
+              
+              x0 =
+                df_tmp$mid[i],
+              
+              y0 =
+                0.94,
+              
+              x1 =
+                df_tmp$label_x[i],
+              
+              y1 =
+                df_tmp$label_y[i] -
+                0.055,
+              
+              col =
+                df_tmp$gene_color[i],
+              
+              lwd =
+                ifelse(
+                  is_sucrose,
+                  2.2,
+                  1.8
+                )
+            )
+            
+            circlize::circos.text(
+              
+              x =
+                df_tmp$label_x[i],
+              
+              y =
+                df_tmp$label_y[i],
+              
+              labels =
+                df_tmp$plot_label[i],
+              
+              facing =
+                "clockwise",
+              
+              niceFacing =
+                TRUE,
+              
+              adj =
+                c(
+                  0,
+                  0.5
+                ),
+              
+              cex =
+                ifelse(
+                  is_sucrose,
+                  0.72,
+                  0.64
+                ),
+              
+              col =
+                df_tmp$gene_color[i],
+              
+              family =
+                "Arial",
+              
+              font =
+                2
+            )
+          }
+        }
+      }
+  )
+  
+  # ==========================================================
+  # TRACK 2
+  # Forward CDS
+  # ==========================================================
+  circlize::circos.trackPlotRegion(
+    
+    ylim =
+      c(
+        0,
+        1
+      ),
+    
+    track.height =
+      0.060,
+    
+    bg.border =
+      NA,
+    
+    panel.fun =
+      function(x, y) {
+        
+        df_tmp <-
+          cds_forward %>%
+          dplyr::filter(
+            seqid ==
+              CELL_META$sector.index
+          )
+        
+        draw_cds_track(
+          df_tmp,
+          col_forward
+        )
+      }
+  )
+  
+  # ==========================================================
+  # TRACK 3
+  # Reverse CDS
+  # ==========================================================
+  circlize::circos.trackPlotRegion(
+    
+    ylim =
+      c(
+        0,
+        1
+      ),
+    
+    track.height =
+      0.060,
+    
+    bg.border =
+      NA,
+    
+    panel.fun =
+      function(x, y) {
+        
+        df_tmp <-
+          cds_reverse %>%
+          dplyr::filter(
+            seqid ==
+              CELL_META$sector.index
+          )
+        
+        draw_cds_track(
+          df_tmp,
+          col_reverse
+        )
+      }
+  )
+  
+  # ==========================================================
+  # TRACK 4
+  # GC content
+  # ==========================================================
+  circlize::circos.trackPlotRegion(
+    
+    ylim =
+      c(
+        0,
+        1
+      ),
+    
+    track.height =
+      0.115,
+    
+    bg.border =
+      NA,
+    
+    panel.fun =
+      function(x, y) {
+        
+        for (
+          i in seq_len(
+            nrow(gc_df)
+          )
+        ) {
+          
+          val <-
+            gc_df$gc_scaled[i]
+          
+          col_use <-
+            ifelse(
+              
+              gc_df$gc_centered[i] >=
+                0,
+              
+              col_gc_pos,
+              
+              col_gc_neg
+            )
+          
+          circlize::circos.rect(
+            
+            xleft =
+              gc_df$start[i],
+            
+            ybottom =
+              0.5,
+            
+            xright =
+              gc_df$end[i],
+            
+            ytop =
+              val,
+            
+            col =
+              col_use,
+            
+            border =
+              NA
+          )
+        }
+        
+        circlize::circos.lines(
+          
+          CELL_META$xlim,
+          
+          c(
+            0.5,
+            0.5
+          ),
+          
+          col =
+            "#AAAAAA",
+          
+          lwd =
+            0.5
+        )
+      }
+  )
+  
+  # ==========================================================
+  # TRACK 5
+  # GC skew
+  # ==========================================================
+  circlize::circos.trackPlotRegion(
+    
+    ylim =
+      c(
+        0,
+        1
+      ),
+    
+    track.height =
+      0.115,
+    
+    bg.border =
+      NA,
+    
+    panel.fun =
+      function(x, y) {
+        
+        for (
+          i in seq_len(
+            nrow(gc_df)
+          )
+        ) {
+          
+          val <-
+            gc_df$skew_scaled[i]
+          
+          col_use <-
+            ifelse(
+              
+              gc_df$gc_skew[i] >=
+                0,
+              
+              col_skew_pos,
+              
+              col_skew_neg
+            )
+          
+          circlize::circos.rect(
+            
+            xleft =
+              gc_df$start[i],
+            
+            ybottom =
+              0.5,
+            
+            xright =
+              gc_df$end[i],
+            
+            ytop =
+              val,
+            
+            col =
+              col_use,
+            
+            border =
+              NA
+          )
+        }
+        
+        circlize::circos.lines(
+          
+          CELL_META$xlim,
+          
+          c(
+            0.5,
+            0.5
+          ),
+          
+          col =
+            "#AAAAAA",
+          
+          lwd =
+            0.5
+        )
+      }
+  )
+  
+  # ==========================================================
+  # Center text
+  # ==========================================================
+  graphics::text(
+    
+    x =
+      0,
+    
+    y =
+      0.075,
+    
+    labels =
+      "Bifidobacterium adolescentis",
+    
+    family =
+      "Arial",
+    
+    font =
+      3,
+    
+    cex =
+      1.18
+  )
+  
+  graphics::text(
+    
+    x =
+      0,
+    
+    y =
+      -0.025,
+    
+    labels =
+      "ATCC 15703",
+    
+    family =
+      "Arial",
+    
+    font =
+      2,
+    
+    cex =
+      1.05
+  )
+  
+  graphics::text(
+    
+    x =
+      0,
+    
+    y =
+      -0.125,
+    
+    labels =
+      paste0(
+        round(
+          genome_length /
+            1e6,
+          2
+        ),
+        " Mb"
+      ),
+    
+    family =
+      "Arial",
+    
+    font =
+      2,
+    
+    cex =
+      0.82
+  )
+  
+  # ==========================================================
+  # LEGEND
+  # ==========================================================
+  graphics::legend(
+    
+    x =
+      -1.47,
+    
+    y =
+      -0.72,
+    
+    legend =
+      c(
+        "GH13-related CAZymes",
+        "GH13_18 sucrose phosphorylase",
+        "Forward CDS",
+        "Reverse CDS",
+        "GC content",
+        "GC skew"
+      ),
+    
+    fill =
+      c(
+        col_gh13,
+        col_sucrose,
+        col_forward,
+        col_reverse,
+        col_gc_pos,
+        col_skew_pos
+      ),
+    
+    border =
+      NA,
+    
+    bty =
+      "n",
+    
+    cex =
+      0.76,
+    
+    text.font =
+      2,
+    
+    xpd =
+      NA
+  )
+  
+  circlize::circos.clear()
+}
+
+
+# ============================================================
+# 23. Preview in RStudio
+# ============================================================
+plot_genome_circle()
+
+
+# ============================================================
+# 24. Export PDF
+#
+# IMPORTANT:
+# - NO showtext
+# - cairo_pdf
+# - Arial at device level
+# - text retained as real PDF text as much as possible
+# ============================================================
+
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig5A_B_adolescentis_GH13_FINAL_ARCHIVE_TEXT.pdf"
+)
+
+grDevices::cairo_pdf(
+  filename = pdf_file,
+  width = 9,
+  height = 9,
+  family = "Arial"
+)
+
+plot_genome_circle()
+
+grDevices::dev.off()
+
+cat(
+  "\nPDF successfully exported to:\n",
+  pdf_file,
+  "\n"
+)
