@@ -1,0 +1,271 @@
+# ============================================================
+# Hainan candidate species heatmap
+# Young / Middle / Longevity
+#
+# Hainan Top15 candidate species
+# Style consistent with previous Fig.3A
+# ============================================================
+
+# ------------------------------------------------------------
+# 0. Load packages
+# ------------------------------------------------------------
+library(readxl)
+library(dplyr)
+library(tibble)
+library(pheatmap)
+library(grid)
+library(gtable)
+
+# ------------------------------------------------------------
+# Input file
+# ------------------------------------------------------------
+file_path <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "non_sichuan_top15_candidate_species.xlsx"
+)
+
+hainan_df <- read_excel(
+  file_path,
+  sheet = "Hainan"
+)
+
+
+
+# ------------------------------------------------------------
+# Prepare Hainan candidate species data
+# ------------------------------------------------------------
+heat_df <- hainan_df %>%
+  transmute(
+    Species = trimws(as.character(Species)),
+    Young = as.numeric(mean_Young),
+    Middle = as.numeric(mean_Middle),
+    Longevity = as.numeric(mean_Longevity)
+  ) %>%
+  filter(
+    !is.na(Species),
+    Species != ""
+  ) %>%
+  mutate(
+    Young = ifelse(is.na(Young), 0, Young),
+    Middle = ifelse(is.na(Middle), 0, Middle),
+    Longevity = ifelse(is.na(Longevity), 0, Longevity)
+  )
+
+cat("\nNumber of Hainan candidate species:\n")
+print(nrow(heat_df))
+
+cat("\nHainan candidate species:\n")
+print(heat_df$Species)
+
+# ------------------------------------------------------------
+# Convert to matrix
+# ------------------------------------------------------------
+heat_mat <- heat_df %>%
+  column_to_rownames("Species") %>%
+  as.matrix()
+
+# 固定年龄组顺序
+heat_mat <- heat_mat[
+  ,
+  c(
+    "Young",
+    "Middle",
+    "Longevity"
+  ),
+  drop = FALSE
+]
+
+# ------------------------------------------------------------
+# Log10 transform
+# ------------------------------------------------------------
+heat_log <- log10(
+  heat_mat + 1e-6
+)
+
+# ------------------------------------------------------------
+# Row Z-score
+#
+# 每一个菌种：
+# 比较 Young / Middle / Longevity 三组之间的相对变化
+# ------------------------------------------------------------
+heat_z <- t(
+  scale(
+    t(heat_log)
+  )
+)
+
+# 防止三组完全相同时产生 NA / Inf
+heat_z[is.na(heat_z)] <- 0
+heat_z[is.infinite(heat_z)] <- 0
+
+# ------------------------------------------------------------
+#  Limit display range
+# ------------------------------------------------------------
+heat_z_plot <- pmax(
+  pmin(
+    heat_z,
+    2
+  ),
+  -2
+)
+
+# ------------------------------------------------------------
+# Color palette
+#
+# Green  = relatively low
+# White  = intermediate
+# Red    = relatively high
+# ------------------------------------------------------------
+heat_colors <- colorRampPalette(
+  c(
+    "#4F8F83",
+    "#F7F7F7",
+    "#B85C5C"
+  )
+)(100)
+
+heat_breaks <- seq(
+  -2,
+  2,
+  length.out = 101
+)
+
+# ------------------------------------------------------------
+#  Draw pheatmap as gtable
+#
+# 关键：
+# silent = TRUE
+# 先获得热图对象，再给 matrix 区域额外加黑色外框
+# ------------------------------------------------------------
+ph <- pheatmap(
+  heat_z_plot,
+  
+  color = heat_colors,
+  breaks = heat_breaks,
+  
+  # ----------------------------------------------------------
+  # Clustering
+  # ----------------------------------------------------------
+  cluster_rows = TRUE,
+  
+  # 年龄具有自然顺序，所以固定：
+  # Young -> Middle -> Longevity
+  cluster_cols = FALSE,
+  
+  clustering_distance_rows = "correlation",
+  clustering_method = "complete",
+  
+  treeheight_row = 55,
+  treeheight_col = 0,
+  
+  # ----------------------------------------------------------
+  # Heatmap cell borders
+  # ----------------------------------------------------------
+  border_color = "white",
+  
+  # ----------------------------------------------------------
+  # Font size
+  #
+  # 不在这里指定 fontfamily
+  # Arial 在 cairo_pdf device 层面指定
+  # ----------------------------------------------------------
+  fontsize = 12,
+  fontsize_row = 10.5,
+  fontsize_col = 13,
+  
+  angle_col = 0,
+  
+  scale = "none",
+  
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  
+  legend = TRUE,
+  
+  main = "",
+  
+  # 不直接绘制
+  silent = TRUE
+)
+
+# ------------------------------------------------------------
+#  Add black outer border around heatmap matrix
+#
+# 外框宽度 = 1.5
+# ------------------------------------------------------------
+
+gt <- ph$gtable
+
+# 找到 heatmap matrix 本身所在位置
+matrix_index <- which(
+  gt$layout$name == "matrix"
+)
+
+if (length(matrix_index) != 1) {
+  stop(
+    "无法准确识别 heatmap matrix 区域。"
+  )
+}
+
+# 在 matrix 外面叠加一个黑色矩形
+gt <- gtable_add_grob(
+  gt,
+  
+  grobs = rectGrob(
+    gp = gpar(
+      col = "black",
+      fill = NA,
+      lwd = 1.5
+    )
+  ),
+  
+  t = gt$layout$t[matrix_index],
+  l = gt$layout$l[matrix_index],
+  b = gt$layout$b[matrix_index],
+  r = gt$layout$r[matrix_index],
+  
+  z = Inf,
+  name = "heatmap_outer_border"
+)
+
+# ============================================================
+# Preview in RStudio
+# ============================================================
+
+grid.newpage()
+grid.draw(gt)
+
+# ============================================================
+# 12. Export PDF
+#
+# IMPORTANT:
+# - no showtext
+# - Cairo PDF
+# - Arial specified at device level
+# - text remains as text as much as possible
+# ============================================================
+
+graphics.off()
+
+grDevices::cairo_pdf(
+  filename = paste0(
+    "C:/Users/Administrator/Desktop/",
+    "Fig_Hainan_age_candidate_species_heatmap.pdf"
+  ),
+  width = 6.6,
+  height = 7.8,
+  family = "Arial"
+)
+
+grid.newpage()
+grid.draw(gt)
+
+dev.off()
+
+cat(
+  "\nHeatmap exported successfully:\n",
+  paste0(
+    "C:/Users/Administrator/Desktop/",
+    "Fig_Hainan_age_candidate_species_heatmap.pdf\n"
+  )
+)
