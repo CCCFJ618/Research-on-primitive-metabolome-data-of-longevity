@@ -1,0 +1,358 @@
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(showtext)
+library(sysfonts)
+
+######Fig D
+font_add(
+  family = "Arial",
+  regular = "C:/Windows/Fonts/arial.ttf",
+  bold = "C:/Windows/Fonts/arialbd.ttf",
+  italic = "C:/Windows/Fonts/ariali.ttf",
+  bolditalic = "C:/Windows/Fonts/arialbi.ttf"
+)
+
+showtext_auto()
+
+file <- "C:/Users/Administrator/Desktop/长寿老人/长寿老人/老人-外显子组/5genes_CADD_REVEL_summary.xlsx"
+
+df <- read_excel(file)
+
+dat_e <- df %>%
+  transmute(
+    Gene = Gene.refGene,
+    n_variants = as.numeric(n_variants)
+  ) %>%
+  mutate(
+    Highlight = ifelse(Gene == "SI", "SI", "Other")
+  ) %>%
+  arrange(n_variants) %>%
+  mutate(
+    Gene = factor(Gene, levels = Gene)
+  )
+
+si_e <- dat_e %>% filter(Gene == "SI")
+non_si_e <- dat_e %>% filter(Gene != "SI")
+
+cols_gene <- c(
+  "Other" = "#4F8F83",
+  "SI" = "#B85C5C"
+)
+
+p_e <- ggplot(dat_e, aes(x = n_variants, y = Gene, fill = Highlight)) +
+  
+  geom_col(
+    width = 0.58
+  ) +
+  
+  # 非SI数字：黑色
+  geom_text(
+    data = non_si_e,
+    aes(label = n_variants),
+    hjust = -0.18,
+    family = "Arial",
+    fontface = "bold",
+    size = 5,
+    color = "black"
+  ) +
+  
+  # SI数字：砖红色
+  geom_text(
+    data = si_e,
+    aes(label = n_variants),
+    hjust = -0.18,
+    family = "Arial",
+    fontface = "bold",
+    size = 5,
+    color = "#B85C5C"
+  ) +
+  
+  scale_fill_manual(values = cols_gene) +
+  
+  scale_x_continuous(
+    breaks = 0:6,
+    expand = expansion(mult = c(0, 0.12))
+  ) +
+  
+  labs(
+    x = "Number of variants",
+    y = NULL
+  ) +
+  
+  theme_classic(
+    base_family = "Arial",
+    base_size = 12
+  ) +
+  theme(
+    aspect.ratio = 1,
+    axis.line = element_blank(),
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    axis.title.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 16,
+      color = "black"
+    ),
+    axis.text.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 13,
+      color = "black"
+    ),
+    axis.text.y = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 14,
+      color = "black"
+    ),
+    axis.ticks = element_line(
+      linewidth = 1,
+      color = "black"
+    ),
+    legend.position = "none"
+  )
+
+p_e
+
+
+# ============================================================
+# Fig E
+# ============================================================
+
+dat_f <- df %>%
+  transmute(
+    Gene = Gene.refGene,
+    mean_CADD = as.numeric(mean_CADD)
+  ) %>%
+  mutate(
+    Highlight = ifelse(Gene == "SI", "SI", "Other")
+  ) %>%
+  arrange(mean_CADD) %>%
+  mutate(
+    Gene = factor(Gene, levels = Gene)
+  )
+
+si_f <- dat_f %>% filter(Gene == "SI")
+non_si_f <- dat_f %>% filter(Gene != "SI")
+
+p_f <- ggplot(dat_f, aes(x = mean_CADD, y = Gene, fill = Highlight)) +
+  
+  geom_col(
+    width = 0.58
+  ) +
+  
+  # 非SI数字：黑色
+  geom_text(
+    data = non_si_f,
+    aes(label = sprintf("%.2f", mean_CADD)),
+    hjust = -0.15,
+    family = "Arial",
+    fontface = "bold",
+    size = 4.8,
+    color = "black"
+  ) +
+  
+  # SI数字：砖红色
+  geom_text(
+    data = si_f,
+    aes(label = sprintf("%.2f", mean_CADD)),
+    hjust = -0.15,
+    family = "Arial",
+    fontface = "bold",
+    size = 4.8,
+    color = "#B85C5C"
+  ) +
+  
+  scale_fill_manual(values = cols_gene) +
+  
+  scale_x_continuous(
+    expand = expansion(mult = c(0, 0.18))
+  ) +
+  
+  labs(
+    x = "Mean CADD score",
+    y = NULL
+  ) +
+  
+  theme_classic(
+    base_family = "Arial",
+    base_size = 12
+  ) +
+  theme(
+    aspect.ratio = 1,
+    axis.line = element_blank(),
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    axis.title.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 16,
+      color = "black"
+    ),
+    axis.text.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 13,
+      color = "black"
+    ),
+    axis.text.y = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 14,
+      color = "black"
+    ),
+    axis.ticks = element_line(
+      linewidth = 1,
+      color = "black"
+    ),
+    legend.position = "none"
+  )
+
+p_f
+
+
+# ============================================================
+# Fig F
+# ============================================================
+
+dat_g <- df %>%
+  transmute(
+    Gene = Gene.refGene,
+    mean_REVEL_raw = as.numeric(mean_REVEL)
+  ) %>%
+  mutate(
+    mean_REVEL_plot = ifelse(is.na(mean_REVEL_raw), 0, mean_REVEL_raw),
+    label_text = ifelse(
+      is.na(mean_REVEL_raw),
+      "NA",
+      sprintf("%.3f", mean_REVEL_raw)
+    ),
+    Highlight = ifelse(Gene == "SI", "SI", "Other")
+  ) %>%
+  arrange(mean_REVEL_plot) %>%
+  mutate(
+    Gene = factor(Gene, levels = Gene)
+  )
+
+si_g <- dat_g %>% filter(Gene == "SI")
+non_si_g <- dat_g %>% filter(Gene != "SI")
+
+p_g <- ggplot(dat_g, aes(x = mean_REVEL_plot, y = Gene, fill = Highlight)) +
+  
+  geom_col(
+    width = 0.58
+  ) +
+  
+  # 非SI数字：黑色
+  geom_text(
+    data = non_si_g,
+    aes(label = label_text),
+    hjust = -0.15,
+    family = "Arial",
+    fontface = "bold",
+    size = 4.8,
+    color = "black"
+  ) +
+  
+  # SI数字：砖红色
+  geom_text(
+    data = si_g,
+    aes(label = label_text),
+    hjust = -0.15,
+    family = "Arial",
+    fontface = "bold",
+    size = 4.8,
+    color = "#B85C5C"
+  ) +
+  
+  scale_fill_manual(values = cols_gene) +
+  
+  scale_x_continuous(
+    limits = c(0, 0.80),
+    breaks = seq(0, 0.75, 0.15),
+    expand = expansion(mult = c(0, 0.08))
+  ) +
+  
+  labs(
+    x = "Mean REVEL score",
+    y = NULL
+  ) +
+  
+  theme_classic(
+    base_family = "Arial",
+    base_size = 12
+  ) +
+  theme(
+    aspect.ratio = 1,
+    axis.line = element_blank(),
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    axis.title.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 16,
+      color = "black"
+    ),
+    axis.text.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 13,
+      color = "black"
+    ),
+    axis.text.y = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 14,
+      color = "black"
+    ),
+    axis.ticks = element_line(
+      linewidth = 1,
+      color = "black"
+    ),
+    legend.position = "none"
+  )
+
+p_g
+
+
+# ============================================================
+# 导出为 PDF
+# ============================================================
+
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig1E_variant_count.pdf",
+  plot = p_e,
+  width = 5.5,
+  height = 5.5,
+  units = "in",
+  device = cairo_pdf
+)
+
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig1F_CADD.pdf",
+  plot = p_f,
+  width = 5.5,
+  height = 5.5,
+  units = "in",
+  device = cairo_pdf
+)
+
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig1G_REVEL.pdf",
+  plot = p_g,
+  width = 5.5,
+  height = 5.5,
+  units = "in",
+  device = cairo_pdf
+)
