@@ -1,0 +1,259 @@
+# ============================================================
+# Fig.4A
+# Top 15 genus heatmap across 3 regions
+# ============================================================
+
+# ------------------------------------------------------------
+# 0. Load packages
+# ------------------------------------------------------------
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(pheatmap)
+
+# ------------------------------------------------------------
+# 1. Read data
+# ------------------------------------------------------------
+file_path <- "C:/Users/Administrator/Desktop/长寿老人/长寿老人/老人-宏基因组/genus四地区丰度表.xlsx"
+
+genus_df <- read_excel(
+  file_path,
+  sheet = 1
+)
+
+# ------------------------------------------------------------
+# 2. Basic cleaning
+# ------------------------------------------------------------
+genus_df <- genus_df %>%
+  mutate(
+    area = trimws(as.character(area)),
+    Genus = trimws(as.character(Genus)),
+    mean_abundance = as.numeric(mean_abundance)
+  ) %>%
+  filter(
+    !is.na(area),
+    !is.na(Genus),
+    !is.na(mean_abundance)
+  )
+
+# ------------------------------------------------------------
+# 3. Keep only the 3 target regions
+# ------------------------------------------------------------
+genus_3area <- genus_df %>%
+  filter(
+    area %in% c(
+      "Hainan",
+      "Sardinia (Italy)",
+      "Emilia Romagna region (Italy)"
+    )
+  )
+
+cat("\nRegions retained:\n")
+print(unique(genus_3area$area))
+
+# ------------------------------------------------------------
+# 4. Calculate overall mean abundance
+#    and select Top 15 genera
+# ------------------------------------------------------------
+top15_genera <- genus_3area %>%
+  group_by(Genus) %>%
+  summarise(
+    overall_mean = mean(
+      mean_abundance,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(overall_mean)) %>%
+  slice_head(n = 15) %>%
+  pull(Genus)
+
+cat("\nTop 15 genera:\n")
+print(top15_genera)
+
+# ------------------------------------------------------------
+# 5. Long -> wide
+# ------------------------------------------------------------
+heat_df <- genus_3area %>%
+  filter(
+    Genus %in% top15_genera
+  ) %>%
+  group_by(
+    Genus,
+    area
+  ) %>%
+  summarise(
+    mean_abundance = mean(
+      mean_abundance,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = area,
+    values_from = mean_abundance,
+    values_fill = 0
+  )
+
+# ------------------------------------------------------------
+# 6. Convert to matrix
+# ------------------------------------------------------------
+heat_mat <- heat_df %>%
+  column_to_rownames("Genus") %>%
+  as.matrix()
+
+# 固定原始地区列顺序
+heat_mat <- heat_mat[
+  ,
+  c(
+    "Hainan",
+    "Sardinia (Italy)",
+    "Emilia Romagna region (Italy)"
+  ),
+  drop = FALSE
+]
+
+# 图上显示简洁地区名
+colnames(heat_mat) <- c(
+  "Hainan",
+  "Sardinia",
+  "Emilia Romagna"
+)
+
+# ------------------------------------------------------------
+# 7. Log10 transform
+# ------------------------------------------------------------
+heat_log <- log10(
+  heat_mat + 1e-6
+)
+
+# ------------------------------------------------------------
+# 8. Row Z-score
+# ------------------------------------------------------------
+heat_z <- t(
+  scale(
+    t(heat_log)
+  )
+)
+
+# 某些行如果没有变化，会出现 NA
+heat_z[is.na(heat_z)] <- 0
+heat_z[is.infinite(heat_z)] <- 0
+
+# ------------------------------------------------------------
+# 9. Limit display range
+# ------------------------------------------------------------
+heat_z_plot <- pmax(
+  pmin(heat_z, 2),
+  -2
+)
+
+# ------------------------------------------------------------
+# 10. Color palette
+# ------------------------------------------------------------
+heat_colors <- colorRampPalette(
+  c(
+    "#4F8F83",
+    "#F7F7F7",
+    "#B85C5C"
+  )
+)(100)
+
+heat_breaks <- seq(
+  -2,
+  2,
+  length.out = 101
+)
+
+# ============================================================
+# 11. Draw heatmap in RStudio
+# ============================================================
+
+pheatmap(
+  heat_z_plot,
+  
+  color = heat_colors,
+  breaks = heat_breaks,
+  
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  
+  clustering_distance_rows = "correlation",
+  clustering_distance_cols = "correlation",
+  clustering_method = "complete",
+  
+  treeheight_row = 55,
+  treeheight_col = 40,
+  
+  border_color = "white",
+  
+  fontsize = 12,
+  fontsize_row = 11,
+  fontsize_col = 13,
+  
+  angle_col = 0,
+  
+  scale = "none",
+  
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  
+  legend = TRUE,
+  
+  main = ""
+)
+
+# ============================================================
+# 12. Export PDF
+# ============================================================
+
+graphics.off()
+
+grDevices::cairo_pdf(
+  filename = "C:/Users/Administrator/Desktop/Fig3A_top15_genus_region_heatmap.pdf",
+  width = 7.5,
+  height = 7.0,
+  family = "Arial"
+)
+
+pheatmap(
+  heat_z_plot,
+  
+  color = heat_colors,
+  breaks = heat_breaks,
+  
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  
+  clustering_distance_rows = "correlation",
+  clustering_distance_cols = "correlation",
+  clustering_method = "complete",
+  
+  treeheight_row = 55,
+  treeheight_col = 40,
+  
+  border_color = "white",
+  
+  fontsize = 12,
+  fontsize_row = 11,
+  fontsize_col = 13,
+  
+  angle_col = 0,
+  
+  scale = "none",
+  
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  
+  legend = TRUE,
+  
+  main = ""
+)
+
+dev.off()
+
+cat(
+  "\nFig.3A PDF exported successfully:\n",
+  "C:/Users/Administrator/Desktop/Fig3A_top15_genus_region_heatmap.pdf\n"
+)
