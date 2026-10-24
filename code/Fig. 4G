@@ -1,0 +1,855 @@
+# Sardinia species-level scatter plots
+#
+# Left : Longevity vs Middle
+# Right: Longevity vs Young
+#
+# Green = Significant Up in Longevity
+# Grey  = all other species (background only, no legend)
+# ------------------------------------------------------------
+# 0. Load packages
+# ------------------------------------------------------------
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(patchwork)
+
+# ------------------------------------------------------------
+# Read data
+# ------------------------------------------------------------
+file_path <- "C:/Users/Administrator/Desktop/长寿老人/长寿老人/老人-宏基因组/地区之间的比较—确定年龄分组/Wilcoxon_species_results.xlsx"
+
+wilcox_species <- read_excel(
+  file_path,
+  sheet = 1
+)
+# ------------------------------------------------------------
+# Parameters
+# ------------------------------------------------------------
+pseudo <- 1e-6
+
+col_up <- "#4F8F83"
+col_ns <- "#C8C8C8"
+col_ba <- "#B85C5C"
+
+target_species <- "Bifidobacterium adolescentis"
+
+# ------------------------------------------------------------
+# Clean data
+# ------------------------------------------------------------
+wilcox_species <- wilcox_species %>%
+  mutate(
+    area = as.character(area),
+    Species = as.character(Species),
+    
+    mean_Young = as.numeric(mean_Young),
+    mean_Middle = as.numeric(mean_Middle),
+    mean_Longevity = as.numeric(mean_Longevity),
+    
+    p_Y_L = as.numeric(p_Y_L),
+    p_M_L = as.numeric(p_M_L)
+  )
+
+# ------------------------------------------------------------
+# Sardinia data
+# ------------------------------------------------------------
+sardinia_df <- wilcox_species %>%
+  filter(area == "Sardinia (Italy)") %>%
+  filter(
+    !is.na(Species),
+    !is.na(mean_Young),
+    !is.na(mean_Middle),
+    !is.na(mean_Longevity)
+  )
+
+# ------------------------------------------------------------
+# Longevity vs Middle
+# Significant Up:
+# p_M_L < 0.05
+# AND mean_Longevity > mean_Middle
+# ------------------------------------------------------------
+df_ML_S <- sardinia_df %>%
+  mutate(
+    x = log10(mean_Middle + pseudo),
+    y = log10(mean_Longevity + pseudo),
+    
+    sig_up = !is.na(p_M_L) &
+      p_M_L < 0.05 &
+      mean_Longevity > mean_Middle,
+    
+    status = case_when(
+      Species == target_species ~ "Bifidobacterium adolescentis",
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    ),
+    
+    target_fill = case_when(
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    )
+  )
+
+# ------------------------------------------------------------
+# Longevity vs Young
+# Significant Up:
+# p_Y_L < 0.05
+# AND mean_Longevity > mean_Young
+# ------------------------------------------------------------
+df_YL_S <- sardinia_df %>%
+  mutate(
+    x = log10(mean_Young + pseudo),
+    y = log10(mean_Longevity + pseudo),
+    
+    sig_up = !is.na(p_Y_L) &
+      p_Y_L < 0.05 &
+      mean_Longevity > mean_Young,
+    
+    status = case_when(
+      Species == target_species ~ "Bifidobacterium adolescentis",
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    ),
+    
+    target_fill = case_when(
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    )
+  )
+
+# ------------------------------------------------------------
+# Unified axis range
+# ------------------------------------------------------------
+all_values_S <- c(
+  df_ML_S$x, df_ML_S$y,
+  df_YL_S$x, df_YL_S$y
+)
+
+axis_min_S <- floor(min(all_values_S, na.rm = TRUE))
+axis_max_S <- ceiling(max(all_values_S, na.rm = TRUE))
+
+# ------------------------------------------------------------
+# Plot function
+# ------------------------------------------------------------
+make_scatter_S <- function(dat, title_text, x_text) {
+  
+  ggplot(
+    dat,
+    aes(x = x, y = y)
+  ) +
+    
+    # --------------------------------------------------------
+  # y = x reference line
+  # --------------------------------------------------------
+  geom_abline(
+    slope = 1,
+    intercept = 0,
+    linetype = "dashed",
+    linewidth = 0.75,
+    color = "#777777"
+  ) +
+    
+    # --------------------------------------------------------
+  #  Grey background points FIRST
+  # --------------------------------------------------------
+  geom_point(
+    data = dat %>%
+      filter(status == "Other"),
+    color = col_ns,
+    size = 2.2,
+    alpha = 0.78,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # Significant Up points SECOND
+  # --------------------------------------------------------
+  geom_point(
+    data = dat %>%
+      filter(status == "Up"),
+    aes(color = "Significant Up"),
+    size = 2.7,
+    alpha = 1
+  ) +
+    
+    # --------------------------------------------------------
+  #  B. adolescentis LAST
+  # Fill follows status, red outline
+  # --------------------------------------------------------
+  geom_point(
+    data = dat %>%
+      filter(status == "Bifidobacterium adolescentis"),
+    aes(fill = target_fill),
+    shape = 21,
+    color = col_ba,
+    stroke = 1.25,
+    size = 4.4,
+    alpha = 1,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # B. adolescentis label
+  # --------------------------------------------------------
+  geom_text_repel(
+    data = dat %>%
+      filter(status == "Bifidobacterium adolescentis"),
+    aes(label = Species),
+    family = "Arial",
+    fontface = "bold",
+    size = 4.8,
+    color = col_ba,
+    box.padding = 0.35,
+    point.padding = 0.30,
+    segment.color = col_ba,
+    segment.size = 0.5,
+    max.overlaps = Inf,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # Legend: Significant Up only
+  # --------------------------------------------------------
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Significant Up" = col_up
+    ),
+    breaks = "Significant Up"
+  ) +
+    
+    # --------------------------------------------------------
+  # Fill for B. adolescentis
+  # --------------------------------------------------------
+  scale_fill_manual(
+    values = c(
+      "Up" = col_up,
+      "Other" = col_ns
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Coordinate
+  # --------------------------------------------------------
+  coord_equal(
+    xlim = c(axis_min_S, axis_max_S),
+    ylim = c(axis_min_S, axis_max_S),
+    clip = "off"
+  ) +
+    
+    # --------------------------------------------------------
+  # Labels
+  # --------------------------------------------------------
+  labs(
+    title = title_text,
+    x = x_text,
+    y = "log10(Longevity abundance + pseudocount)"
+  ) +
+    
+    # --------------------------------------------------------
+  # Theme
+  # --------------------------------------------------------
+  theme_classic(base_family = "Arial") +
+    
+    theme(
+      text = element_text(
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      plot.title = element_text(
+        size = 19,
+        hjust = 0.5,
+        margin = margin(b = 8)
+      ),
+      
+      axis.title.x = element_text(
+        size = 14,
+        margin = margin(t = 10)
+      ),
+      
+      axis.title.y = element_text(
+        size = 14,
+        margin = margin(r = 10)
+      ),
+      
+      axis.text = element_text(
+        size = 12.5,
+        color = "black"
+      ),
+      
+      axis.line = element_blank(),
+      
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 1.5
+      ),
+      
+      axis.ticks = element_line(
+        color = "black",
+        linewidth = 1
+      ),
+      
+      # 图例左上角
+      legend.position = c(0.03, 0.97),
+      legend.justification = c(0, 1),
+      legend.direction = "vertical",
+      
+      legend.text = element_text(
+        size = 11.5,
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      legend.key = element_blank(),
+      
+      legend.background = element_rect(
+        fill = "white",
+        color = NA
+      ),
+      
+      plot.margin = margin(
+        t = 10,
+        r = 16,
+        b = 12,
+        l = 12
+      )
+    ) +
+    
+    guides(
+      color = guide_legend(
+        override.aes = list(
+          size = 4,
+          alpha = 1
+        )
+      ),
+      fill = "none"
+    )
+}
+
+# ------------------------------------------------------------
+# Left panel
+# Longevity vs Middle
+# ------------------------------------------------------------
+p_ML_S <- make_scatter_S(
+  df_ML_S,
+  title_text = "Sardinia: Longevity vs Middle",
+  x_text = "log10(Middle abundance + pseudocount)"
+)
+
+# ------------------------------------------------------------
+#  Right panel
+# Longevity vs Young
+# ------------------------------------------------------------
+p_YL_S <- make_scatter_S(
+  df_YL_S,
+  title_text = "Sardinia: Longevity vs Young",
+  x_text = "log10(Young abundance + pseudocount)"
+)
+
+# ------------------------------------------------------------
+# Combine
+# ------------------------------------------------------------
+p <- p_ML_S + p_YL_S +
+  plot_layout(ncol = 2)
+
+# Show
+p
+
+# ------------------------------------------------------------
+# 12. Export PDF
+# 保留真正文字对象
+# ------------------------------------------------------------
+grDevices::cairo_pdf(
+  filename = "C:/Users/Administrator/Desktop/Fig3D_Sardinia_species_scatter.pdf",
+  width = 12,
+  height = 6.2,
+  family = "Arial"
+)
+
+print(p)
+
+dev.off()
+
+cat(
+  "\nFig.3D PDF exported successfully:\n",
+  "C:/Users/Administrator/Desktop/Fig3D_Sardinia_species_scatter.pdf\n"
+)
+
+
+# ============================================================
+# Emilia Romagna species-level scatter plots
+# Left : Longevity vs Middle
+# Right: Longevity vs Young
+# Green = Significant Up in Longevity
+# Grey  = all other species (background only, no legend)
+# ============================================================
+
+# ------------------------------------------------------------
+# 0. Load packages
+# ------------------------------------------------------------
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(patchwork)
+
+# ------------------------------------------------------------
+# Read Wilcoxon species results
+# ------------------------------------------------------------
+file_path <- paste0(
+  "C:/Users/Administrator/Desktop/长寿老人/长寿老人/",
+  "老人-宏基因组/地区之间的比较—确定年龄分组/",
+  "Wilcoxon_species_results.xlsx"
+)
+
+wilcox_species <- read_excel(
+  file_path,
+  sheet = 1
+)
+
+# 检查列名
+print(colnames(wilcox_species))
+
+# ------------------------------------------------------------
+#  Parameters
+# ------------------------------------------------------------
+pseudo <- 1e-6
+
+col_up <- "#4F8F83"
+col_ns <- "#C8C8C8"
+col_ba <- "#B85C5C"
+
+target_species <- "Bifidobacterium adolescentis"
+
+# ------------------------------------------------------------
+#  Basic cleaning
+# ------------------------------------------------------------
+wilcox_species <- wilcox_species %>%
+  mutate(
+    area = trimws(as.character(area)),
+    Species = trimws(as.character(Species)),
+    
+    mean_Young = as.numeric(mean_Young),
+    mean_Middle = as.numeric(mean_Middle),
+    mean_Longevity = as.numeric(mean_Longevity),
+    
+    p_Y_L = as.numeric(p_Y_L),
+    p_M_L = as.numeric(p_M_L)
+  )
+
+# ------------------------------------------------------------
+# Emilia Romagna data
+# ------------------------------------------------------------
+emilia_df <- wilcox_species %>%
+  filter(
+    area == "Emilia Romagna region (Italy)"
+  ) %>%
+  filter(
+    !is.na(Species),
+    Species != "",
+    !is.na(mean_Young),
+    !is.na(mean_Middle),
+    !is.na(mean_Longevity)
+  )
+
+cat(
+  "\nNumber of Emilia Romagna species =",
+  nrow(emilia_df),
+  "\n"
+)
+
+# ------------------------------------------------------------
+# Longevity vs Middle
+# Significant Up:
+# p_M_L < 0.05
+# AND mean_Longevity > mean_Middle
+# ------------------------------------------------------------
+df_ML_E <- emilia_df %>%
+  mutate(
+    x = log10(mean_Middle + pseudo),
+    y = log10(mean_Longevity + pseudo),
+    
+    sig_up = !is.na(p_M_L) &
+      p_M_L < 0.05 &
+      mean_Longevity > mean_Middle,
+    
+    status = case_when(
+      Species == target_species ~ "Bifidobacterium adolescentis",
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    ),
+    
+    target_fill = case_when(
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    )
+  )
+
+# ------------------------------------------------------------
+# Longevity vs Young
+# Significant Up:
+# p_Y_L < 0.05
+# AND mean_Longevity > mean_Young
+# ------------------------------------------------------------
+df_YL_E <- emilia_df %>%
+  mutate(
+    x = log10(mean_Young + pseudo),
+    y = log10(mean_Longevity + pseudo),
+    
+    sig_up = !is.na(p_Y_L) &
+      p_Y_L < 0.05 &
+      mean_Longevity > mean_Young,
+    
+    status = case_when(
+      Species == target_species ~ "Bifidobacterium adolescentis",
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    ),
+    
+    target_fill = case_when(
+      sig_up ~ "Up",
+      TRUE ~ "Other"
+    )
+  )
+
+# ------------------------------------------------------------
+# Unified axis range
+# ------------------------------------------------------------
+all_values_E <- c(
+  df_ML_E$x,
+  df_ML_E$y,
+  df_YL_E$x,
+  df_YL_E$y
+)
+
+axis_min_E <- floor(
+  min(
+    all_values_E,
+    na.rm = TRUE
+  )
+)
+
+axis_max_E <- ceiling(
+  max(
+    all_values_E,
+    na.rm = TRUE
+  )
+)
+
+# ------------------------------------------------------------
+# Plot function
+# ------------------------------------------------------------
+make_scatter_E <- function(
+    dat,
+    title_text,
+    x_text
+) {
+  
+  ggplot(
+    dat,
+    aes(
+      x = x,
+      y = y
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # y = x reference line
+  # --------------------------------------------------------
+  geom_abline(
+    slope = 1,
+    intercept = 0,
+    linetype = "dashed",
+    linewidth = 0.75,
+    color = "#777777"
+  ) +
+    
+    # --------------------------------------------------------
+  #  Grey background points FIRST
+  # --------------------------------------------------------
+  geom_point(
+    data = dat %>%
+      filter(
+        status == "Other"
+      ),
+    color = col_ns,
+    size = 2.2,
+    alpha = 0.78,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  #  Significant Up points SECOND
+  # --------------------------------------------------------
+  geom_point(
+    data = dat %>%
+      filter(
+        status == "Up"
+      ),
+    aes(
+      color = "Significant Up"
+    ),
+    size = 2.8,
+    alpha = 1
+  ) +
+    
+    # --------------------------------------------------------
+  #  B. adolescentis LAST
+  # fill follows actual status, red outline
+  # --------------------------------------------------------
+  geom_point(
+    data = dat %>%
+      filter(
+        status == "Bifidobacterium adolescentis"
+      ),
+    aes(
+      fill = target_fill
+    ),
+    shape = 21,
+    color = col_ba,
+    stroke = 1.3,
+    size = 4.8,
+    alpha = 1,
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # B. adolescentis label
+  # --------------------------------------------------------
+  geom_text_repel(
+    data = dat %>%
+      filter(
+        status == "Bifidobacterium adolescentis"
+      ),
+    aes(
+      label = Species
+    ),
+    
+    family = "Arial",
+    fontface = "bold",
+    size = 4.8,
+    
+    color = col_ba,
+    
+    box.padding = 0.35,
+    point.padding = 0.30,
+    
+    segment.color = col_ba,
+    segment.size = 0.5,
+    
+    max.overlaps = Inf,
+    
+    show.legend = FALSE
+  ) +
+    
+    # --------------------------------------------------------
+  # Legend
+  # --------------------------------------------------------
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Significant Up" = col_up
+    ),
+    breaks = "Significant Up"
+  ) +
+    
+    # --------------------------------------------------------
+  # Fill for B. adolescentis
+  # --------------------------------------------------------
+  scale_fill_manual(
+    values = c(
+      "Up" = col_up,
+      "Other" = col_ns
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Coordinates
+  # --------------------------------------------------------
+  coord_equal(
+    xlim = c(
+      axis_min_E,
+      axis_max_E
+    ),
+    ylim = c(
+      axis_min_E,
+      axis_max_E
+    ),
+    clip = "off"
+  ) +
+    
+    # --------------------------------------------------------
+  # Labels
+  # --------------------------------------------------------
+  labs(
+    title = title_text,
+    x = x_text,
+    y = "log10(Longevity abundance + pseudocount)"
+  ) +
+    
+    # --------------------------------------------------------
+  # Theme
+  # --------------------------------------------------------
+  theme_classic(
+    base_family = "Arial"
+  ) +
+    
+    theme(
+      
+      text = element_text(
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      plot.title = element_text(
+        size = 19,
+        hjust = 0.5,
+        margin = margin(
+          b = 8
+        )
+      ),
+      
+      axis.title.x = element_text(
+        size = 14,
+        margin = margin(
+          t = 10
+        )
+      ),
+      
+      axis.title.y = element_text(
+        size = 14,
+        margin = margin(
+          r = 10
+        )
+      ),
+      
+      axis.text = element_text(
+        size = 12.5,
+        color = "black"
+      ),
+      
+      axis.line = element_blank(),
+      
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 1.5
+      ),
+      
+      axis.ticks = element_line(
+        color = "black",
+        linewidth = 1
+      ),
+      
+      # ------------------------------------------------------
+      # Legend inside top-left
+      # ------------------------------------------------------
+      legend.position = c(
+        0.03,
+        0.97
+      ),
+      
+      legend.justification = c(
+        0,
+        1
+      ),
+      
+      legend.direction = "vertical",
+      
+      legend.text = element_text(
+        size = 11.5,
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      legend.key = element_blank(),
+      
+      legend.background = element_rect(
+        fill = "white",
+        color = NA
+      ),
+      
+      plot.margin = margin(
+        t = 10,
+        r = 16,
+        b = 12,
+        l = 12
+      )
+    ) +
+    
+    guides(
+      color = guide_legend(
+        override.aes = list(
+          size = 4,
+          alpha = 1
+        )
+      ),
+      fill = "none"
+    )
+}
+
+# ------------------------------------------------------------
+# Left panel
+# Longevity vs Middle
+# ------------------------------------------------------------
+p_ML_E <- make_scatter_E(
+  df_ML_E,
+  title_text = "Emilia Romagna: Longevity vs Middle",
+  x_text = "log10(Middle abundance + pseudocount)"
+)
+
+# ------------------------------------------------------------
+#  Right panel
+# Longevity vs Young
+# ------------------------------------------------------------
+p_YL_E <- make_scatter_E(
+  df_YL_E,
+  title_text = "Emilia Romagna: Longevity vs Young",
+  x_text = "log10(Young abundance + pseudocount)"
+)
+
+# ------------------------------------------------------------
+#  Combine
+# ------------------------------------------------------------
+p <- p_ML_E + p_YL_E +
+  plot_layout(
+    ncol = 2
+  )
+
+# ------------------------------------------------------------
+# 13. Show
+# ------------------------------------------------------------
+p
+
+# ------------------------------------------------------------
+# 14. Export PDF
+# Arial
+# ------------------------------------------------------------
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig3E_Emilia_species_scatter.pdf",
+  plot = p,
+  width = 12,
+  height = 6.2,
+  units = "in",
+  device = cairo_pdf,
+  bg = "white"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
