@@ -1,0 +1,249 @@
+# ============================================================
+# Fig.3A KO volcano plot
+# Longevity vs Non-longevity
+# Arial version
+# Editable text for Illustrator
+# ============================================================
+
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(grid)
+
+
+# ------------------------------------------------------------
+# 1. Data
+# ------------------------------------------------------------
+df <- ko_diff %>%
+  mutate(
+    KO = as.character(KO),
+    mean_longevity = as.numeric(mean_longevity),
+    mean_non_longevity = as.numeric(mean_non_longevity),
+    p = as.numeric(p),
+    FDR = as.numeric(FDR)
+  )
+
+# ------------------------------------------------------------
+# 2. Pseudocount
+# ------------------------------------------------------------
+all_nonzero <- c(
+  df$mean_longevity[df$mean_longevity > 0],
+  df$mean_non_longevity[df$mean_non_longevity > 0]
+)
+
+pseudo <- min(all_nonzero, na.rm = TRUE) / 2
+
+cat("Pseudocount =", pseudo, "\n")
+
+# ------------------------------------------------------------
+# 3. log2FC + significance
+# ------------------------------------------------------------
+df <- df %>%
+  mutate(
+    log2FC = log2(
+      (mean_longevity + pseudo) /
+        (mean_non_longevity + pseudo)
+    ),
+    
+    neglog10P = -log10(p),
+    
+    Group = case_when(
+      p < 0.05 & log2FC > 0 ~ "Longevity",
+      p < 0.05 & log2FC < 0 ~ "Non-longevity",
+      TRUE ~ "NS"
+    )
+  )
+
+# ------------------------------------------------------------
+# 4. Colors
+# ------------------------------------------------------------
+cols <- c(
+  "Non-longevity" = "#D9A66F",
+  "Longevity" = "#4F8F83",
+  "NS" = "#C8C8C8"
+)
+
+highlight_red <- "#B85C5C"
+
+# ------------------------------------------------------------
+# 5. First choose labels
+#
+# 第一版先标 P 最小的 10 个显著 KO
+# 后面我们再换成真正需要讲的糖代谢 KO
+# ------------------------------------------------------------
+label_df <- df %>%
+  filter(p < 0.05) %>%
+  arrange(p) %>%
+  slice_head(n = 10)
+
+print(
+  label_df %>%
+    select(
+      KO,
+      log2FC,
+      p,
+      FDR,
+      Group
+    )
+)
+
+# ------------------------------------------------------------
+# 6. Volcano
+# ------------------------------------------------------------
+p_KO_volcano <- ggplot(
+  df,
+  aes(
+    x = log2FC,
+    y = neglog10P,
+    color = Group
+  )
+) +
+  
+  geom_point(
+    size = 2.7,
+    alpha = 0.78
+  ) +
+  
+  # P = 0.05
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    linewidth = 0.75,
+    color = "#777777"
+  ) +
+  
+  # FC = 0
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.75,
+    color = "#777777"
+  ) +
+  
+  geom_label_repel(
+    data = label_df,
+    aes(label = KO),
+    
+    family = "Arial",
+    fontface = "bold",
+    size = 4.5,
+    
+    color = highlight_red,
+    fill = "white",
+    
+    box.padding = 0.45,
+    point.padding = 0.35,
+    
+    label.size = 0.55,
+    label.r = unit(0.10, "lines"),
+    label.padding = unit(0.16, "lines"),
+    
+    segment.color = highlight_red,
+    segment.size = 0.55,
+    
+    min.segment.length = 0,
+    max.overlaps = Inf,
+    
+    show.legend = FALSE
+  ) +
+  
+  scale_color_manual(
+    values = cols,
+    breaks = c(
+      "Non-longevity",
+      "Longevity",
+      "NS"
+    )
+  ) +
+  
+  labs(
+    x = expression(
+      log[2]~"(Longevity / Non-longevity)"
+    ),
+    y = expression(
+      -log[10]~"(P value)"
+    ),
+    color = NULL
+  ) +
+  
+  theme_classic(
+    base_family = "Arial"
+  ) +
+  
+  theme(
+    text = element_text(
+      family = "Arial",
+      face = "bold",
+      color = "black"
+    ),
+    
+    axis.title.x = element_text(
+      size = 17,
+      face = "bold",
+      margin = margin(t = 10)
+    ),
+    
+    axis.title.y = element_text(
+      size = 17,
+      face = "bold",
+      margin = margin(r = 10)
+    ),
+    
+    axis.text = element_text(
+      size = 14,
+      face = "bold",
+      color = "black"
+    ),
+    
+    # 四边框统一
+    axis.line = element_blank(),
+    
+    axis.ticks = element_line(
+      linewidth = 1,
+      color = "black"
+    ),
+    
+    axis.ticks.length = unit(
+      0.18,
+      "cm"
+    ),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    legend.position = c(
+      0.82,
+      0.90
+    ),
+    
+    legend.text = element_text(
+      size = 12.5,
+      face = "bold"
+    ),
+    
+    legend.key = element_blank(),
+    
+    aspect.ratio = 1,
+    
+    plot.margin = margin(
+      10, 12, 10, 10
+    )
+  )
+
+p_KO_volcano
+
+# ------------------------------------------------------------
+# 8. 导出为 PDF
+#    Cairo PDF
+#    不经过 showtext
+# ------------------------------------------------------------
+ggsave(
+  "C:/Users/Administrator/Desktop/Fig2E_KO_volcano.pdf",
+  plot = p_KO_volcano,
+  width = 6.5,
+  height = 6.5,
+  device = cairo_pdf
+)
