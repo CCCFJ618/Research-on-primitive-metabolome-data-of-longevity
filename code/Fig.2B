@@ -1,0 +1,258 @@
+# Fig.1C KEGG pathway enrichment bubble plot
+# Final version - Arial
+# Editable text for Illustrator
+# =========================================================
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(grid)
+
+
+# =========================================================
+# 1. 读取 KEGG 数据
+# =========================================================
+
+file <- "C:/Users/Administrator/Desktop/长寿老人/长寿老人/老人-外显子组/长寿组GO&KEGG富集结果.xlsx"
+
+kegg <- read_excel(
+  file,
+  sheet = "KEGG_results"
+)
+
+# 检查列名
+names(kegg)
+
+# =========================================================
+# 2. 整理数据
+# =========================================================
+
+kegg_plot <- kegg %>%
+  mutate(
+    RichFactor = as.numeric(RichFactor),
+    Count = as.numeric(Count),
+    pvalue = as.numeric(pvalue),
+    negLog10P = -log10(pvalue)
+  ) %>%
+  filter(
+    !is.na(RichFactor),
+    !is.na(Count),
+    !is.na(pvalue),
+    pvalue > 0
+  )
+
+# =========================================================
+# 3. 选取 P value 最小的前15条通路
+# =========================================================
+
+top_n <- 15
+
+kegg_top <- kegg_plot %>%
+  arrange(pvalue) %>%
+  slice_head(n = top_n) %>%
+  mutate(
+    Description = factor(
+      Description,
+      levels = rev(Description)
+    )
+  )
+
+# =========================================================
+# 4. 定义颜色
+# =========================================================
+
+low_col  <- "#A7CEC8"
+high_col <- "#B85C5C"
+
+# =========================================================
+# 5. 作图
+# =========================================================
+
+p_kegg <- ggplot(
+  kegg_top,
+  aes(
+    x = RichFactor,
+    y = Description
+  )
+) +
+  
+  # -------------------------------------------------------
+# 气泡
+# -------------------------------------------------------
+
+geom_point(
+  aes(
+    size = Count,
+    color = negLog10P
+  ),
+  alpha = 0.90
+) +
+  
+  # -------------------------------------------------------
+# 颜色：-log10(P)
+# -------------------------------------------------------
+
+scale_color_gradient(
+  low = low_col,
+  high = high_col,
+  name = expression(-log[10](P))
+) +
+  
+  # -------------------------------------------------------
+# 气泡大小：Count
+# -------------------------------------------------------
+
+scale_size_continuous(
+  range = c(4, 9),
+  breaks = c(1, 2, 3, 4),
+  name = "Count"
+) +
+  
+  # -------------------------------------------------------
+# x轴
+# -------------------------------------------------------
+
+scale_x_continuous(
+  breaks = seq(0.01, 0.04, 0.01),
+  expand = expansion(
+    mult = c(0.06, 0.10)
+  )
+) +
+  
+  labs(
+    x = "Rich factor",
+    y = NULL
+  ) +
+  
+  theme_classic(
+    base_family = "Arial",
+    base_size = 12
+  ) +
+  
+  theme(
+    
+    # =====================================================
+    # 主体比例：让绘图区更高瘦
+    # =====================================================
+    
+    aspect.ratio = 1.40,
+    
+    # 去掉 theme_classic 默认轴线
+    axis.line = element_blank(),
+    
+    # =====================================================
+    # 四周边框
+    # =====================================================
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    # =====================================================
+    # x轴标题
+    # =====================================================
+    
+    axis.title.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 16,
+      color = "black",
+      margin = margin(t = 8)
+    ),
+    
+    # =====================================================
+    # x轴刻度数字
+    # =====================================================
+    
+    axis.text.x = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 13,
+      color = "black"
+    ),
+    
+    # =====================================================
+    # y轴 pathway 名称
+    # =====================================================
+    
+    axis.text.y = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 11.5,
+      color = "black",
+      margin = margin(r = 5)
+    ),
+    
+    # =====================================================
+    # 坐标轴刻度线
+    # =====================================================
+    
+    axis.ticks = element_line(
+      color = "black",
+      linewidth = 1
+    ),
+    
+    axis.ticks.length = unit(
+      0.12,
+      "cm"
+    ),
+    
+    # =====================================================
+    # 图例
+    # =====================================================
+    
+    legend.position = "right",
+    
+    legend.title = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 12,
+      color = "black"
+    ),
+    
+    legend.text = element_text(
+      family = "Arial",
+      face = "bold",
+      size = 11,
+      color = "black"
+    ),
+    
+    legend.key.height = unit(
+      0.55,
+      "cm"
+    ),
+    
+    # =====================================================
+    # 外边距
+    # =====================================================
+    
+    plot.margin = margin(
+      t = 10,
+      r = 15,
+      b = 10,
+      l = 10
+    )
+  )
+
+# =========================================================
+# 7. 显示
+# =========================================================
+
+p_kegg
+
+# =========================================================
+# 导出为 PDF
+#    Cairo PDF
+#    不经过 showtext
+# =========================================================
+
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig1C_KEGG_bubble.pdf",
+  plot = p_kegg,
+  width = 9,
+  height = 7,
+  units = "in",
+  device = cairo_pdf
+)
