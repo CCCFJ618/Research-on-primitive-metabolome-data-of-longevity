@@ -1,0 +1,567 @@
+# ============================================================
+# Fig.4B
+# Hainan species-level scatter plots
+#
+# Left : Longevity vs Middle
+# Right: Longevity vs Young
+# ============================================================
+
+# ------------------------------------------------------------
+# 0. Load packages
+# ------------------------------------------------------------
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# ------------------------------------------------------------
+# Input file
+# ------------------------------------------------------------
+file_path <- paste0(
+  "C:/Users/Administrator/Desktop/长寿老人/长寿老人/",
+  "老人-宏基因组/地区之间的比较—确定年龄分组/",
+  "Wilcoxon_species_results.xlsx"
+)
+# ------------------------------------------------------------
+# Read Hainan data
+# ------------------------------------------------------------
+
+if ("Hainan" %in% sheet_names) {
+  
+  wilcox_species <- read_excel(
+    file_path,
+    sheet = "Hainan"
+  )
+  
+  if (!"area" %in% colnames(wilcox_species)) {
+    wilcox_species$area <- "Hainan"
+  }
+  
+} else {
+  
+  wilcox_species <- read_excel(
+    file_path,
+    sheet = 1
+  )
+}
+
+# ------------------------------------------------------------
+# Check columns
+# ------------------------------------------------------------
+cat("\nColumns:\n")
+print(colnames(wilcox_species))
+
+required_cols <- c(
+  "Species",
+  "mean_Young",
+  "mean_Middle",
+  "mean_Longevity",
+  "p_Y_L",
+  "p_M_L"
+)
+
+missing_cols <- setdiff(
+  required_cols,
+  colnames(wilcox_species)
+)
+
+if (length(missing_cols) > 0) {
+  stop(
+    "缺少以下必要列：",
+    paste(missing_cols, collapse = ", ")
+  )
+}
+
+# ------------------------------------------------------------
+# Parameters
+# ------------------------------------------------------------
+pseudo <- 1e-6
+
+col_up <- "#4F8F83"
+
+col_other <- "#C8C8C8"
+
+col_sig <- "#B85C5C"
+
+col_ns_border <- "#B5B5B5"
+
+# ------------------------------------------------------------
+# Hainan data
+# ------------------------------------------------------------
+
+if ("area" %in% colnames(wilcox_species)) {
+  
+  hainan_df <- wilcox_species %>%
+    mutate(
+      area = trimws(as.character(area))
+    ) %>%
+    filter(
+      area == "Hainan"
+    )
+  
+} else {
+  
+  hainan_df <- wilcox_species
+}
+
+hainan_df <- hainan_df %>%
+  mutate(
+    Species = trimws(as.character(Species)),
+    
+    mean_Young = as.numeric(mean_Young),
+    mean_Middle = as.numeric(mean_Middle),
+    mean_Longevity = as.numeric(mean_Longevity),
+    
+    p_Y_L = as.numeric(p_Y_L),
+    p_M_L = as.numeric(p_M_L)
+  ) %>%
+  filter(
+    !is.na(Species),
+    Species != "",
+    !is.na(mean_Young),
+    !is.na(mean_Middle),
+    !is.na(mean_Longevity)
+  )
+
+cat(
+  "\nNumber of Hainan species =",
+  nrow(hainan_df),
+  "\n"
+)
+
+# ------------------------------------------------------------
+# Longevity vs Middle
+#
+# Fill:
+# Longevity > Middle -> Up
+#
+# Border:
+# p_M_L < 0.05 -> Significant
+# ------------------------------------------------------------
+df_ML <- hainan_df %>%
+  mutate(
+    
+    x = log10(
+      mean_Middle + pseudo
+    ),
+    
+    y = log10(
+      mean_Longevity + pseudo
+    ),
+    
+    Direction = case_when(
+      mean_Longevity > mean_Middle ~ "Up",
+      TRUE ~ "Other"
+    ),
+    
+    Significance = case_when(
+      !is.na(p_M_L) & p_M_L < 0.05 ~ "P < 0.05",
+      TRUE ~ "NS"
+    )
+  )
+
+# ------------------------------------------------------------
+# Longevity vs Young
+#
+# Fill:
+# Longevity > Young -> Up
+#
+# Border:
+# p_Y_L < 0.05 -> Significant
+# ------------------------------------------------------------
+df_YL <- hainan_df %>%
+  mutate(
+    
+    x = log10(
+      mean_Young + pseudo
+    ),
+    
+    y = log10(
+      mean_Longevity + pseudo
+    ),
+    
+    Direction = case_when(
+      mean_Longevity > mean_Young ~ "Up",
+      TRUE ~ "Other"
+    ),
+    
+    Significance = case_when(
+      !is.na(p_Y_L) & p_Y_L < 0.05 ~ "P < 0.05",
+      TRUE ~ "NS"
+    )
+  )
+
+# ------------------------------------------------------------
+# Check numbers
+# ------------------------------------------------------------
+
+cat("\n==============================\n")
+cat("Longevity vs Middle\n")
+cat("==============================\n")
+
+print(
+  table(
+    df_ML$Direction,
+    df_ML$Significance
+  )
+)
+
+cat("\n==============================\n")
+cat("Longevity vs Young\n")
+cat("==============================\n")
+
+print(
+  table(
+    df_YL$Direction,
+    df_YL$Significance
+  )
+)
+
+# ------------------------------------------------------------
+# Unified axis range
+# ------------------------------------------------------------
+all_values <- c(
+  df_ML$x,
+  df_ML$y,
+  df_YL$x,
+  df_YL$y
+)
+
+axis_min <- floor(
+  min(
+    all_values,
+    na.rm = TRUE
+  )
+)
+
+axis_max <- ceiling(
+  max(
+    all_values,
+    na.rm = TRUE
+  )
+)
+
+cat(
+  "\nAxis range:",
+  axis_min,
+  "to",
+  axis_max,
+  "\n"
+)
+
+# ------------------------------------------------------------
+# Plot function
+# ------------------------------------------------------------
+make_scatter <- function(
+    dat,
+    title_text,
+    x_text
+) {
+  
+  ggplot(
+    dat,
+    aes(
+      x = x,
+      y = y
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # y = x reference line
+  # --------------------------------------------------------
+  geom_abline(
+    slope = 1,
+    intercept = 0,
+    linetype = "dashed",
+    linewidth = 0.75,
+    color = "#777777"
+  ) +
+    
+    # --------------------------------------------------------
+  # All species
+  #
+  # Fill:
+  # Green = Up
+  # Grey  = Other
+  #
+  # Border:
+  # Red   = P < 0.05
+  # Grey  = NS
+  # --------------------------------------------------------
+  geom_point(
+    aes(
+      fill = Direction,
+      color = Significance
+    ),
+    shape = 21,
+    size = 2.7,
+    stroke = 0.75,
+    alpha = 0.90
+  ) +
+    
+    # --------------------------------------------------------
+  # Fill colors
+  # --------------------------------------------------------
+  scale_fill_manual(
+    name = NULL,
+    
+    values = c(
+      "Up" = col_up,
+      "Other" = col_other
+    ),
+    
+    breaks = c(
+      "Up",
+      "Other"
+    ),
+    
+    labels = c(
+      "Up in longevity",
+      "Not up"
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Border colors
+  # --------------------------------------------------------
+  scale_color_manual(
+    name = NULL,
+    
+    values = c(
+      "P < 0.05" = col_sig,
+      "NS" = col_ns_border
+    ),
+    
+    breaks = c(
+      "P < 0.05",
+      "NS"
+    ),
+    
+    labels = c(
+      "P < 0.05",
+      "NS"
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Coordinates
+  # --------------------------------------------------------
+  coord_equal(
+    xlim = c(
+      axis_min,
+      axis_max
+    ),
+    ylim = c(
+      axis_min,
+      axis_max
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Labels
+  # --------------------------------------------------------
+  labs(
+    title = title_text,
+    x = x_text,
+    y = "log10(Longevity abundance + pseudocount)"
+  ) +
+    
+    # --------------------------------------------------------
+  # Theme
+  # --------------------------------------------------------
+  theme_classic(
+    base_family = "Arial"
+  ) +
+    
+    theme(
+      
+      # ------------------------------------------------------
+      # Global text
+      # ------------------------------------------------------
+      text = element_text(
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      # ------------------------------------------------------
+      # Title
+      # ------------------------------------------------------
+      plot.title = element_text(
+        size = 19,
+        hjust = 0.5,
+        margin = margin(
+          b = 8
+        )
+      ),
+      
+      # ------------------------------------------------------
+      # X axis title
+      # ------------------------------------------------------
+      axis.title.x = element_text(
+        size = 14,
+        margin = margin(
+          t = 10
+        )
+      ),
+      
+      # ------------------------------------------------------
+      # Y axis title
+      # ------------------------------------------------------
+      axis.title.y = element_text(
+        size = 14,
+        margin = margin(
+          r = 10
+        )
+      ),
+      
+      # ------------------------------------------------------
+      # Axis numbers
+      # ------------------------------------------------------
+      axis.text = element_text(
+        size = 12.5,
+        color = "black"
+      ),
+      
+      # ------------------------------------------------------
+      # Remove classic axis lines
+      # ------------------------------------------------------
+      axis.line = element_blank(),
+      
+      # ------------------------------------------------------
+      # Four-sided border
+      # ------------------------------------------------------
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 1.5
+      ),
+      
+      # ------------------------------------------------------
+      # Ticks
+      # ------------------------------------------------------
+      axis.ticks = element_line(
+        color = "black",
+        linewidth = 1
+      ),
+      
+      # ------------------------------------------------------
+      # Legend
+      # ------------------------------------------------------
+      legend.position = c(
+        0.03,
+        0.97
+      ),
+      
+      legend.justification = c(
+        0,
+        1
+      ),
+      
+      legend.direction = "vertical",
+      
+      legend.text = element_text(
+        size = 11.5,
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      legend.key = element_blank(),
+      
+      legend.background = element_rect(
+        fill = "white",
+        color = NA
+      ),
+      
+      # ------------------------------------------------------
+      # Margins
+      # ------------------------------------------------------
+      plot.margin = margin(
+        t = 10,
+        r = 16,
+        b = 12,
+        l = 12
+      )
+    ) +
+    
+    # --------------------------------------------------------
+  # Legend appearances
+  # --------------------------------------------------------
+  guides(
+    
+    # Fill legend
+    fill = guide_legend(
+      order = 1,
+      override.aes = list(
+        shape = 21,
+        size = 4,
+        color = "#B5B5B5",
+        stroke = 0.7,
+        alpha = 1
+      )
+    ),
+    
+    # Significance legend
+    color = guide_legend(
+      order = 2,
+      override.aes = list(
+        shape = 21,
+        size = 4,
+        fill = "white",
+        stroke = 1,
+        alpha = 1
+      )
+    )
+  )
+}
+
+# ------------------------------------------------------------
+# Left panel
+# Longevity vs Middle
+# ------------------------------------------------------------
+p_ML <- make_scatter(
+  df_ML,
+  title_text = "Hainan: Longevity vs Middle",
+  x_text = "log10(Middle abundance + pseudocount)"
+)
+
+# ------------------------------------------------------------
+# Right panel
+# Longevity vs Young
+# ------------------------------------------------------------
+p_YL <- make_scatter(
+  df_YL,
+  title_text = "Hainan: Longevity vs Young",
+  x_text = "log10(Young abundance + pseudocount)"
+)
+
+# ------------------------------------------------------------
+#  Combine
+# ------------------------------------------------------------
+p_fig4b <- p_ML + p_YL +
+  plot_layout(
+    ncol = 2
+  )
+
+# ------------------------------------------------------------
+#  Show
+# ------------------------------------------------------------
+p_fig4b
+
+# ------------------------------------------------------------
+#  Export PDF
+#
+# NO showtext
+# Cairo PDF
+# Arial text retained as much as possible
+# ------------------------------------------------------------
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig3C_Hainan_species_scatter.pdf",
+  plot = p_fig4b,
+  width = 12,
+  height = 6.2,
+  units = "in",
+  device = cairo_pdf,
+  bg = "white"
+)
