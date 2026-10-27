@@ -1,0 +1,693 @@
+# ============================================================
+# Fig6C
+# Age vs Oxoglutaric acid (alpha-KG)
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Packages
+# ------------------------------------------------------------
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ============================================================
+# Parameters
+# ============================================================
+
+alpha_id <- "metab_18484"
+
+col_point <- "#78C6C2"
+col_line  <- "#8E8E8E"
+col_stat  <- "#D64F4F"
+
+
+# ============================================================
+# Check age_df
+# ============================================================
+
+if (!exists("age_df")) {
+  stop(
+    "对象 age_df 不存在，请先加载年龄信息。"
+  )
+}
+
+
+# ============================================================
+# Read original 115-sample metabolomics data
+# ============================================================
+
+metab_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "长寿老人/长寿老人/老人-代谢组/",
+  "115样本_原始代谢组数据.xlsx"
+)
+
+
+metab_raw <- read_excel(
+  metab_file
+)
+
+
+metab_raw <- as.data.frame(
+  metab_raw,
+  check.names = FALSE
+)
+
+
+# ============================================================
+# Standardize first column as metab_id
+# ============================================================
+
+colnames(metab_raw)[1] <- "metab_id"
+
+
+metab_raw$metab_id <- as.character(
+  metab_raw$metab_id
+)
+
+
+# ============================================================
+# Extract CORRECT alpha-KG row
+# ============================================================
+
+alpha_row <- metab_raw %>%
+  
+  filter(
+    metab_id ==
+      alpha_id
+  )
+
+
+cat(
+  "\n========================================\n",
+  "Oxoglutaric acid\n",
+  "========================================\n"
+)
+
+
+cat(
+  "metab_id =",
+  alpha_id,
+  "\n"
+)
+
+
+cat(
+  "Number of matched metabolite rows =",
+  nrow(
+    alpha_row
+  ),
+  "\n"
+)
+
+
+if (
+  nrow(alpha_row) != 1
+) {
+  
+  stop(
+    "metab_18484 在原始代谢组数据中没有唯一匹配，请检查数据。"
+  )
+}
+
+
+# ============================================================
+# Convert alpha-KG abundance to long format
+# ============================================================
+
+alpha_long <- alpha_row %>%
+  
+  pivot_longer(
+    
+    cols =
+      -metab_id,
+    
+    names_to =
+      "Sample",
+    
+    values_to =
+      "alphaKG"
+  ) %>%
+  
+  transmute(
+    
+    Sample =
+      as.character(
+        Sample
+      ),
+    
+    alphaKG =
+      as.numeric(
+        alphaKG
+      )
+  ) %>%
+  
+  filter(
+    !is.na(Sample),
+    !is.na(alphaKG)
+  )
+
+
+# ============================================================
+# Prepare age data
+# ============================================================
+
+age_use <- age_df %>%
+  
+  transmute(
+    
+    Sample =
+      as.character(
+        Sample
+      ),
+    
+    Age =
+      as.numeric(
+        Age
+      )
+  ) %>%
+  
+  filter(
+    !is.na(Sample),
+    !is.na(Age)
+  ) %>%
+  
+  distinct(
+    Sample,
+    .keep_all = TRUE
+  )
+
+
+# ============================================================
+# Match alpha-KG with actual age
+# ============================================================
+
+alpha_age_df <- alpha_long %>%
+  
+  inner_join(
+    age_use,
+    by = "Sample"
+  ) %>%
+  
+  filter(
+    !is.na(Age),
+    !is.na(alphaKG)
+  ) %>%
+  
+  select(
+    Sample,
+    Age,
+    alphaKG
+  )
+
+
+# ============================================================
+# Check data
+# ============================================================
+
+cat(
+  "\n========================================\n",
+  "Final matched data\n",
+  "========================================\n"
+)
+
+
+cat(
+  "Matched samples =",
+  nrow(
+    alpha_age_df
+  ),
+  "\n"
+)
+
+
+cat(
+  "Age range =",
+  range(
+    alpha_age_df$Age,
+    na.rm = TRUE
+  ),
+  "\n"
+)
+
+
+cat(
+  "alpha-KG range =",
+  range(
+    alpha_age_df$alphaKG,
+    na.rm = TRUE
+  ),
+  "\n"
+)
+
+
+print(
+  head(
+    alpha_age_df,
+    10
+  )
+)
+
+
+# ============================================================
+# Spearman correlation
+# ============================================================
+
+cor_res <- suppressWarnings(
+  
+  stats::cor.test(
+    
+    alpha_age_df$Age,
+    
+    alpha_age_df$alphaKG,
+    
+    method =
+      "spearman",
+    
+    exact =
+      FALSE
+  )
+)
+
+
+rho_val <- unname(
+  cor_res$estimate
+)
+
+
+p_val <- cor_res$p.value
+
+
+# ============================================================
+# Print final statistics
+# ============================================================
+
+cat(
+  "\n========================================\n",
+  "FINAL: Age vs alpha-KG\n",
+  "========================================\n"
+)
+
+
+cat(
+  "n =",
+  nrow(
+    alpha_age_df
+  ),
+  "\n"
+)
+
+
+cat(
+  "Spearman rho =",
+  rho_val,
+  "\n"
+)
+
+
+cat(
+  "P =",
+  p_val,
+  "\n"
+)
+
+
+# ============================================================
+# Statistics label
+# ============================================================
+
+stat_label <- paste0(
+  
+  "\u03C1 = ",
+  
+  sprintf(
+    "%.3f",
+    rho_val
+  ),
+  
+  "\nP ",
+  
+  ifelse(
+    
+    p_val < 0.001,
+    
+    "< 0.001",
+    
+    paste0(
+      "= ",
+      sprintf(
+        "%.3f",
+        p_val
+      )
+    )
+  )
+)
+
+
+# ============================================================
+# Plot
+# ============================================================
+
+p_alpha_age <- ggplot(
+  
+  alpha_age_df,
+  
+  aes(
+    x = Age,
+    y = alphaKG
+  )
+  
+) +
+  
+  
+  # ----------------------------------------------------------
+# Linear trend + 95% CI
+#
+# Only for visual presentation.
+# Statistical test above is Spearman.
+# ----------------------------------------------------------
+
+geom_smooth(
+  
+  method =
+    "lm",
+  
+  formula =
+    y ~ x,
+  
+  se =
+    TRUE,
+  
+  color =
+    col_line,
+  
+  fill =
+    "#D9D9D9",
+  
+  linewidth =
+    1.1,
+  
+  alpha =
+    0.30
+) +
+  
+  
+  # ----------------------------------------------------------
+# Samples
+# ----------------------------------------------------------
+
+geom_point(
+  
+  size =
+    3.0,
+  
+  alpha =
+    0.82,
+  
+  color =
+    col_point
+) +
+  
+  
+  # ----------------------------------------------------------
+# Spearman statistics
+# ----------------------------------------------------------
+
+annotate(
+  
+  "text",
+  
+  x =
+    Inf,
+  
+  y =
+    Inf,
+  
+  label =
+    stat_label,
+  
+  hjust =
+    1.10,
+  
+  vjust =
+    1.20,
+  
+  family =
+    "Arial",
+  
+  fontface =
+    "bold",
+  
+  size =
+    4.2,
+  
+  color =
+    col_stat
+) +
+  
+  
+  # ----------------------------------------------------------
+# Labels
+# ----------------------------------------------------------
+
+labs(
+  
+  title =
+    "Oxoglutaric acid",
+  
+  x =
+    "Age",
+  
+  y =
+    "Oxoglutaric acid abundance"
+) +
+  
+  
+  # ----------------------------------------------------------
+# Theme
+# ----------------------------------------------------------
+
+theme_classic(
+  base_family =
+    "Arial"
+) +
+  
+  theme(
+    
+    text =
+      element_text(
+        
+        family =
+          "Arial",
+        
+        face =
+          "bold",
+        
+        color =
+          "black"
+      ),
+    
+    
+    plot.title =
+      element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          18,
+        
+        face =
+          "bold",
+        
+        hjust =
+          0.5,
+        
+        margin =
+          margin(
+            b = 8
+          )
+      ),
+    
+    
+    axis.title.x =
+      element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          13,
+        
+        face =
+          "bold",
+        
+        margin =
+          margin(
+            t = 8
+          )
+      ),
+    
+    
+    axis.title.y =
+      element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          13,
+        
+        face =
+          "bold",
+        
+        margin =
+          margin(
+            r = 8
+          )
+      ),
+    
+    
+    axis.text =
+      element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          10.5,
+        
+        face =
+          "bold",
+        
+        color =
+          "black"
+      ),
+    
+    
+    # 四边框，因此关闭默认 axis.line
+    axis.line =
+      element_blank(),
+    
+    
+    axis.ticks =
+      element_line(
+        
+        color =
+          "black",
+        
+        linewidth =
+          0.9
+      ),
+    
+    
+    panel.border =
+      element_rect(
+        
+        color =
+          "black",
+        
+        fill =
+          NA,
+        
+        linewidth =
+          1.4
+      ),
+    
+    
+    plot.margin =
+      margin(
+        t = 8,
+        r = 10,
+        b = 8,
+        l = 8
+      ),
+    
+    
+    # 正方形绘图区
+    aspect.ratio =
+      1
+  )
+
+
+# ============================================================
+# Preview
+# ============================================================
+
+print(
+  p_alpha_age
+)
+
+
+# ============================================================
+# Export matched data
+# ============================================================
+
+write.csv(
+  
+  alpha_age_df,
+  
+  "C:/Users/Administrator/Desktop/Fig5F_Age_alphaKG_correct_data.csv",
+  
+  row.names =
+    FALSE
+)
+
+
+# ============================================================
+# Export PDF
+#
+# Arial
+# NO showtext
+# Cairo PDF
+# ============================================================
+
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig5F_Age_vs_Oxoglutaric_acid_CORRECT.pdf"
+)
+
+
+if (
+  file.exists(
+    pdf_file
+  )
+) {
+  
+  file.remove(
+    pdf_file
+  )
+}
+
+
+grDevices::cairo_pdf(
+  
+  filename =
+    pdf_file,
+  
+  width =
+    5.2,
+  
+  height =
+    5.6,
+  
+  family =
+    "Arial"
+)
+
+
+print(
+  p_alpha_age
+)
+
+
+grDevices::dev.off()
+
+
+cat(
+  "\nPDF saved to:\n",
+  pdf_file,
+  "\n"
+)
