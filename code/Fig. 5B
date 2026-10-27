@@ -1,0 +1,546 @@
+# ============================================================
+# Fig5B
+# GH13 families vs all species
+# ============================================================
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+
+# ------------------------------------------------------------
+# 1. File path
+# ------------------------------------------------------------
+file_path <- paste0(
+  "C:/Users/Administrator/Desktop/长寿老人/长寿老人/",
+  "老人-宏基因组/地区之间的比较—确定年龄分组/",
+  "三个GH13_与全部菌种相关性分析.xlsx"
+)
+
+# ------------------------------------------------------------
+# 2. Parameters
+# ------------------------------------------------------------
+top_n <- 10
+
+target_species <- "Bifidobacterium adolescentis"
+
+col_target <- "#B85C5C"
+col_other  <- "#8E8E8E"
+
+# ------------------------------------------------------------
+# 3. Read data
+# ------------------------------------------------------------
+df_18_raw <- read_excel(
+  file_path,
+  sheet = "GH13_18"
+)
+
+df_28_raw <- read_excel(
+  file_path,
+  sheet = "GH13_28"
+)
+
+df_39_raw <- read_excel(
+  file_path,
+  sheet = "GH13_39"
+)
+
+# ------------------------------------------------------------
+# 4. Clean function
+# ------------------------------------------------------------
+clean_rank_data <- function(df, family_name) {
+  
+  df %>%
+    mutate(
+      Family = as.character(Family),
+      Species = as.character(Species),
+      n = as.numeric(n),
+      rho = as.numeric(rho),
+      p = as.numeric(p),
+      FDR = as.numeric(FDR),
+      rank_rho = as.numeric(rank_rho),
+      total_species = as.numeric(total_species),
+      rho_percentile = as.numeric(rho_percentile),
+      Family_plot = family_name
+    ) %>%
+    filter(
+      !is.na(Species),
+      Species != "",
+      !is.na(rho),
+      !is.na(rank_rho)
+    )
+}
+
+df_18 <- clean_rank_data(
+  df_18_raw,
+  "GH13_18"
+)
+
+df_28 <- clean_rank_data(
+  df_28_raw,
+  "GH13_28"
+)
+
+df_39 <- clean_rank_data(
+  df_39_raw,
+  "GH13_39"
+)
+
+# ------------------------------------------------------------
+# 5. TRUE Top10
+# ------------------------------------------------------------
+prepare_top10 <- function(df) {
+  
+  out <- df %>%
+    
+    # TRUE rank order
+    arrange(rank_rho) %>%
+    
+    # Top10
+    slice_head(
+      n = top_n
+    ) %>%
+    
+    mutate(
+      is_target =
+        Species == target_species,
+      
+      # IMPORTANT:
+      # plain text only
+      # NO HTML / NO ggtext
+      Species_label =
+        Species
+    )
+  
+  # rank 1 at top
+  out <- out %>%
+    mutate(
+      row_id = row_number(),
+      ypos = rev(
+        seq_len(
+          n()
+        )
+      )
+    )
+  
+  return(out)
+}
+
+# ------------------------------------------------------------
+# 6. Prepare Top10
+# ------------------------------------------------------------
+plot_18 <- prepare_top10(
+  df_18
+)
+
+plot_28 <- prepare_top10(
+  df_28
+)
+
+plot_39 <- prepare_top10(
+  df_39
+)
+
+# ------------------------------------------------------------
+# 7. Check results
+# ------------------------------------------------------------
+cat("\n================ GH13_18 Top10 ================\n")
+
+print(
+  plot_18 %>%
+    select(
+      rank_rho,
+      Species,
+      rho,
+      ypos
+    ),
+  n = Inf
+)
+
+cat("\n================ GH13_28 Top10 ================\n")
+
+print(
+  plot_28 %>%
+    select(
+      rank_rho,
+      Species,
+      rho,
+      ypos
+    ),
+  n = Inf
+)
+
+cat("\n================ GH13_39 Top10 ================\n")
+
+print(
+  plot_39 %>%
+    select(
+      rank_rho,
+      Species,
+      rho,
+      ypos
+    ),
+  n = Inf
+)
+
+# ------------------------------------------------------------
+# 8. Unified x-axis
+# ------------------------------------------------------------
+all_top <- bind_rows(
+  plot_18,
+  plot_28,
+  plot_39
+)
+
+x_max <- max(
+  all_top$rho,
+  na.rm = TRUE
+)
+
+x_max <- ceiling(
+  x_max * 10
+) / 10
+
+# ------------------------------------------------------------
+# IMPORTANT:
+# Give numeric labels enough room on right
+# ------------------------------------------------------------
+x_right <- x_max + 0.18
+
+# ------------------------------------------------------------
+# 9. Plot function
+# ------------------------------------------------------------
+make_rank_plot <- function(
+    df,
+    title_text
+) {
+  
+  ggplot(
+    df,
+    aes(
+      x = rho,
+      y = ypos
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Other stems
+  # --------------------------------------------------------
+  geom_segment(
+    data = df %>%
+      filter(
+        !is_target
+      ),
+    
+    aes(
+      x = 0,
+      xend = rho,
+      y = ypos,
+      yend = ypos
+    ),
+    
+    color = col_other,
+    linewidth = 1.15,
+    lineend = "round"
+  ) +
+    
+    # --------------------------------------------------------
+  # Target stem
+  # --------------------------------------------------------
+  geom_segment(
+    data = df %>%
+      filter(
+        is_target
+      ),
+    
+    aes(
+      x = 0,
+      xend = rho,
+      y = ypos,
+      yend = ypos
+    ),
+    
+    color = col_target,
+    linewidth = 1.45,
+    lineend = "round"
+  ) +
+    
+    # --------------------------------------------------------
+  # Other points
+  # --------------------------------------------------------
+  geom_point(
+    data = df %>%
+      filter(
+        !is_target
+      ),
+    
+    color = col_other,
+    size = 3.2
+  ) +
+    
+    # --------------------------------------------------------
+  # Target point
+  # --------------------------------------------------------
+  geom_point(
+    data = df %>%
+      filter(
+        is_target
+      ),
+    
+    color = col_target,
+    size = 4.3
+  ) +
+    
+    # --------------------------------------------------------
+  # Other rho values
+  # --------------------------------------------------------
+  geom_text(
+    data = df %>%
+      filter(
+        !is_target
+      ),
+    
+    aes(
+      label = sprintf(
+        "%.3f",
+        rho
+      )
+    ),
+    
+    hjust = -0.15,
+    family = "Arial",
+    fontface = "bold",
+    size = 2.8,
+    color = col_other
+  ) +
+    
+    # --------------------------------------------------------
+  # Target rho + rank
+  # --------------------------------------------------------
+  geom_text(
+    data = df %>%
+      filter(
+        is_target
+      ),
+    
+    aes(
+      label = paste0(
+        sprintf(
+          "%.3f",
+          rho
+        ),
+        "  (#",
+        rank_rho,
+        ")"
+      )
+    ),
+    
+    hjust = -0.15,
+    family = "Arial",
+    fontface = "bold",
+    size = 3.0,
+    color = col_target
+  ) +
+    
+    # --------------------------------------------------------
+  # X axis
+  #
+  # Extra space added on right
+  # --------------------------------------------------------
+  scale_x_continuous(
+    limits = c(
+      0,
+      x_right
+    ),
+    
+    expand = expansion(
+      mult = c(
+        0,
+        0
+      )
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Y axis
+  #
+  # IMPORTANT:
+  # Keep original top/bottom blank space.
+  # Do NOT change this again.
+  # --------------------------------------------------------
+  scale_y_continuous(
+    breaks = df$ypos,
+    labels = df$Species_label,
+    
+    expand = expansion(
+      mult = c(
+        0.03,
+        0.03
+      )
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Prevent numeric labels from being clipped
+  # --------------------------------------------------------
+  coord_cartesian(
+    clip = "off"
+  ) +
+    
+    # --------------------------------------------------------
+  # Labels
+  # --------------------------------------------------------
+  labs(
+    title = title_text,
+    x = "Spearman rho",
+    y = NULL
+  ) +
+    
+    # --------------------------------------------------------
+  # Theme
+  # --------------------------------------------------------
+  theme_classic(
+    base_family = "Arial"
+  ) +
+    
+    theme(
+      
+      text = element_text(
+        family = "Arial",
+        face = "bold",
+        color = "black"
+      ),
+      
+      plot.title = element_text(
+        family = "Arial",
+        size = 18,
+        face = "bold",
+        hjust = 0.5,
+        margin = margin(
+          b = 8
+        )
+      ),
+      
+      axis.title.x = element_text(
+        family = "Arial",
+        size = 14,
+        face = "bold",
+        margin = margin(
+          t = 8
+        )
+      ),
+      
+      axis.text.x = element_text(
+        family = "Arial",
+        size = 11,
+        face = "bold",
+        color = "black"
+      ),
+      
+      # ======================================================
+      # IMPORTANT:
+      # Plain element_text
+      # NO ggtext
+      #
+      # This is necessary for editable PDF text
+      # ======================================================
+      axis.text.y = element_text(
+        family = "Arial",
+        size = 10.5,
+        face = "bold",
+        color = "black"
+      ),
+      
+      axis.line = element_blank(),
+      
+      axis.ticks = element_line(
+        color = "black",
+        linewidth = 0.9
+      ),
+      
+      panel.border = element_rect(
+        color = "black",
+        fill = NA,
+        linewidth = 1.4
+      ),
+      
+      # Enough room for labels/value text
+      plot.margin = margin(
+        t = 8,
+        r = 38,
+        b = 8,
+        l = 8
+      )
+    )
+}
+
+# ------------------------------------------------------------
+# 10. Make plots
+# ------------------------------------------------------------
+p18 <- make_rank_plot(
+  plot_18,
+  "GH13_18"
+)
+
+p28 <- make_rank_plot(
+  plot_28,
+  "GH13_28"
+)
+
+p39 <- make_rank_plot(
+  plot_39,
+  "GH13_39"
+)
+
+# ------------------------------------------------------------
+# 11. Combine
+# ------------------------------------------------------------
+p_fig5B <- p18 +
+  p28 +
+  p39 +
+  plot_layout(
+    ncol = 3
+  )
+
+# ------------------------------------------------------------
+# 12. Preview
+# ------------------------------------------------------------
+p_fig5B
+
+# ============================================================
+# 13. Export PDF
+#
+# IMPORTANT:
+# Reduce PHYSICAL HEIGHT only.
+#
+# This reduces spacing between species
+# WITHOUT changing y-axis top/bottom expansion.
+#
+# NO showtext
+# NO ggtext
+# ============================================================
+
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig4B_GH13_species_rank_Top10_TEXT_compact.pdf"
+)
+
+grDevices::cairo_pdf(
+  filename = pdf_file,
+  width = 15.5,
+  height = 4.6,
+  family = "Arial"
+)
+
+print(
+  p_fig5B
+)
+
+grDevices::dev.off()
+
+cat(
+  "\nPDF successfully exported to:\n",
+  pdf_file,
+  "\n"
+)
