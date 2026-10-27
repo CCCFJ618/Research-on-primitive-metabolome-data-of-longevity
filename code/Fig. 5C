@@ -1,0 +1,396 @@
+# ============================================================
+# Fig5C
+# Bifidobacterium adolescentis vs GH13_18 / GH13_28 / GH13_39
+# ------------------------------------------------------------
+# Packages
+# ------------------------------------------------------------
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+
+# ------------------------------------------------------------
+# Parameters
+# ------------------------------------------------------------
+pseudo <- 1e-6
+
+col_point <- "#78C6C2"
+col_line  <- "#8E8E8E"
+col_stat  <- "#D64F4F"
+
+target_families <- c(
+  "GH13_18",
+  "GH13_28",
+  "GH13_39"
+)
+
+# ============================================================
+# Convert GH13 table from wide to long
+# ============================================================
+gh13_long <- gh13_data %>%
+  
+  dplyr::mutate(
+    Family = as.character(Family)
+  ) %>%
+  
+  dplyr::filter(
+    Family %in% target_families
+  ) %>%
+  
+  tidyr::pivot_longer(
+    cols = -Family,
+    names_to = "Sample",
+    values_to = "GH13_abundance"
+  ) %>%
+  
+  dplyr::mutate(
+    Sample = as.character(Sample),
+    GH13_abundance = as.numeric(GH13_abundance)
+  )
+
+# ============================================================
+# Clean B. adolescentis table
+# ============================================================
+bado_clean <- bado_long %>%
+  
+  dplyr::transmute(
+    Sample = as.character(Sample),
+    B_adolescentis = as.numeric(B_adolescentis)
+  ) %>%
+  
+  dplyr::filter(
+    !is.na(Sample),
+    !is.na(B_adolescentis)
+  )
+
+# ============================================================
+# Merge by sample
+# ============================================================
+cor_data <- gh13_long %>%
+  
+  dplyr::inner_join(
+    bado_clean,
+    by = "Sample"
+  ) %>%
+  
+  dplyr::filter(
+    !is.na(GH13_abundance),
+    !is.na(B_adolescentis)
+  ) %>%
+  
+  dplyr::mutate(
+    
+    # log10 transformation for visualization
+    log_Bado =
+      log10(
+        B_adolescentis + pseudo
+      ),
+    
+    log_GH13 =
+      log10(
+        GH13_abundance + pseudo
+      )
+  )
+
+# ============================================================
+# Spearman correlation
+# ============================================================
+cor_results <- lapply(
+  
+  target_families,
+  
+  function(fam) {
+    
+    tmp <- cor_data %>%
+      dplyr::filter(
+        Family == fam
+      )
+    
+    test <- suppressWarnings(
+      stats::cor.test(
+        tmp$B_adolescentis,
+        tmp$GH13_abundance,
+        method = "spearman",
+        exact = FALSE
+      )
+    )
+    
+    data.frame(
+      Family = fam,
+      n = nrow(tmp),
+      rho = unname(test$estimate),
+      p = test$p.value
+    )
+  }
+)
+
+cor_results <- dplyr::bind_rows(
+  cor_results
+)
+
+# ------------------------------------------------------------
+# BH correction across the three GH13 families
+# ------------------------------------------------------------
+cor_results <- cor_results %>%
+  dplyr::mutate(
+    q = p.adjust(
+      p,
+      method = "BH"
+    )
+  )
+
+print(cor_results)
+
+# ============================================================
+# P/q formatting
+# ============================================================
+format_p <- function(x) {
+  
+  if (is.na(x)) {
+    return("NA")
+  }
+  
+  if (x < 0.001) {
+    return("< 0.001")
+  }
+  
+  sprintf(
+    "%.3f",
+    x
+  )
+}
+
+# ============================================================
+# Single scatter plot function
+# ============================================================
+make_cor_plot <- function(fam) {
+  
+  df <- cor_data %>%
+    dplyr::filter(
+      Family == fam
+    )
+  
+  stat <- cor_results %>%
+    dplyr::filter(
+      Family == fam
+    )
+  
+  stat_label <- paste0(
+    "\u03C1 = ",
+    sprintf("%.3f", stat$rho),
+    "\nq ",
+    ifelse(
+      stat$q < 0.001,
+      "< 0.001",
+      paste0(
+        "= ",
+        sprintf("%.3f", stat$q)
+      )
+    )
+  )
+  
+  ggplot2::ggplot(
+    df,
+    ggplot2::aes(
+      x = log_Bado,
+      y = log_GH13
+    )
+  ) +
+    
+    # --------------------------------------------------------
+  # Regression trend + 95% CI
+  # Statistical annotation remains Spearman rho
+  # --------------------------------------------------------
+  ggplot2::geom_smooth(
+    method = "lm",
+    formula = y ~ x,
+    se = TRUE,
+    color = col_line,
+    fill = "#D9D9D9",
+    linewidth = 1.1,
+    alpha = 0.30
+  ) +
+    
+    # --------------------------------------------------------
+  # Sample points
+  # --------------------------------------------------------
+  ggplot2::geom_point(
+    size = 3.0,
+    alpha = 0.82,
+    color = col_point
+  ) +
+    
+    # --------------------------------------------------------
+  # Statistics
+  # --------------------------------------------------------
+  ggplot2::annotate(
+    "text",
+    x = Inf,
+    y = Inf,
+    label = stat_label,
+    hjust = 1.12,
+    vjust = 1.25,
+    family = "Arial",
+    fontface = "bold",
+    size = 4.2,
+    color = col_stat
+  ) +
+    
+    # --------------------------------------------------------
+  # Labels
+  #
+  # IMPORTANT:
+  # use plain text instead of expression()
+  # for better Illustrator editability
+  # --------------------------------------------------------
+  ggplot2::labs(
+    title = fam,
+    x = "log10 B. adolescentis abundance",
+    y = "log10 GH13 abundance"
+  ) +
+    
+    # --------------------------------------------------------
+  # Theme
+  # --------------------------------------------------------
+  ggplot2::theme_classic(
+    base_family = "Arial"
+  ) +
+    
+    ggplot2::theme(
+      
+      text =
+        ggplot2::element_text(
+          family = "Arial",
+          face = "bold",
+          color = "black"
+        ),
+      
+      plot.title =
+        ggplot2::element_text(
+          family = "Arial",
+          size = 18,
+          face = "bold",
+          hjust = 0.5,
+          margin = ggplot2::margin(
+            b = 8
+          )
+        ),
+      
+      axis.title.x =
+        ggplot2::element_text(
+          family = "Arial",
+          size = 13,
+          face = "bold",
+          margin = ggplot2::margin(
+            t = 8
+          )
+        ),
+      
+      axis.title.y =
+        ggplot2::element_text(
+          family = "Arial",
+          size = 13,
+          face = "bold",
+          margin = ggplot2::margin(
+            r = 8
+          )
+        ),
+      
+      axis.text =
+        ggplot2::element_text(
+          family = "Arial",
+          size = 10.5,
+          face = "bold",
+          color = "black"
+        ),
+      
+      axis.line =
+        ggplot2::element_line(
+          color = "black",
+          linewidth = 1
+        ),
+      
+      axis.ticks =
+        ggplot2::element_line(
+          color = "black",
+          linewidth = 0.9
+        ),
+      
+      panel.border =
+        ggplot2::element_rect(
+          color = "black",
+          fill = NA,
+          linewidth = 1.4
+        ),
+      
+      plot.margin =
+        ggplot2::margin(
+          t = 8,
+          r = 10,
+          b = 8,
+          l = 8
+        )
+    )
+}
+
+# ============================================================
+# Draw three panels
+# ============================================================
+p18 <- make_cor_plot(
+  "GH13_18"
+)
+
+p28 <- make_cor_plot(
+  "GH13_28"
+)
+
+p39 <- make_cor_plot(
+  "GH13_39"
+)
+
+p_cor <-
+  p18 +
+  p28 +
+  p39 +
+  patchwork::plot_layout(
+    ncol = 3
+  )
+
+# ------------------------------------------------------------
+# Preview
+# ------------------------------------------------------------
+p_cor
+
+# ============================================================
+# 11. Export PDF
+#
+# IMPORTANT:
+# NO showtext
+# NO expression()
+# Cairo PDF
+# Arial
+# ============================================================
+
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig4_GH13_Badolescentis_correlations_TEXT.pdf"
+)
+
+grDevices::cairo_pdf(
+  filename = pdf_file,
+  width = 12.5,
+  height = 4.5,
+  family = "Arial"
+)
+
+print(
+  p_cor
+)
+
+grDevices::dev.off()
+
+cat(
+  "\nPDF successfully exported to:\n",
+  pdf_file,
+  "\n"
+)
