@@ -1,0 +1,340 @@
+# ============================================================
+# Fig6C
+# KEGG enrichment bubble plot of differential metabolites
+# Top20 pathways by P value
+# ============================================================
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(showtext)
+library(sysfonts)
+library(grid)
+
+# ------------------------------------------------------------
+# Times New Roman
+# ------------------------------------------------------------
+font_add(
+  family = "TNR",
+  regular = "C:/Windows/Fonts/times.ttf",
+  bold = "C:/Windows/Fonts/timesbd.ttf",
+  italic = "C:/Windows/Fonts/timesi.ttf",
+  bolditalic = "C:/Windows/Fonts/timesbi.ttf"
+)
+
+showtext_auto()
+
+# ------------------------------------------------------------
+# Input file
+# ------------------------------------------------------------
+file_path <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "长寿老人/长寿老人/老人-代谢组/",
+  "115样本_差异代谢物_KEGG富集结果.xlsx"
+)
+
+kegg_raw <- read_excel(file_path)
+
+# ------------------------------------------------------------
+# Clean data
+# ------------------------------------------------------------
+kegg_df <- kegg_raw %>%
+  mutate(
+    pathway_id = as.character(pathway_id),
+    pathway_name = as.character(pathway_name),
+    
+    GeneRatio = as.numeric(GeneRatio),
+    BgRatio = as.numeric(BgRatio),
+    FoldEnrichment = as.numeric(FoldEnrichment),
+    
+    P = as.numeric(P),
+    FDR = as.numeric(FDR),
+    
+    neglog10P = -log10(P)
+  ) %>%
+  filter(
+    !is.na(pathway_name),
+    pathway_name != "",
+    !is.na(GeneRatio),
+    !is.na(P),
+    P > 0
+  )
+
+count_col <- names(kegg_raw)[3]
+
+kegg_df$foreground_count <- as.numeric(
+  kegg_raw[[count_col]][
+    match(kegg_df$pathway_id, kegg_raw$pathway_id)
+  ]
+)
+
+cat("\nCount column used:", count_col, "\n")
+
+# ------------------------------------------------------------
+# Select Top20 pathways
+# ------------------------------------------------------------
+plot_df <- kegg_df %>%
+  arrange(
+    P,
+    desc(FoldEnrichment),
+    desc(GeneRatio)
+  ) %>%
+  slice_head(n = 20)
+
+# ------------------------------------------------------------
+# Sort display order
+# ------------------------------------------------------------
+plot_df <- plot_df %>%
+  arrange(desc(P)) %>%
+  mutate(
+    pathway_name = factor(
+      pathway_name,
+      levels = pathway_name
+    )
+  )
+
+# ------------------------------------------------------------
+# Colors
+# ------------------------------------------------------------
+color_low  <- "#A7CEC8"
+color_high <- "#B85C5C"
+
+# ------------------------------------------------------------
+# Plot
+# ------------------------------------------------------------
+p_kegg_metab <- ggplot(
+  plot_df,
+  aes(
+    x = GeneRatio,
+    y = pathway_name
+  )
+) +
+  
+  geom_point(
+    aes(
+      size = foreground_count,
+      color = neglog10P
+    ),
+    alpha = 0.92
+  ) +
+  
+  # ----------------------------------------------------------
+# Bubble size
+# ----------------------------------------------------------
+scale_size_continuous(
+  name = "Count",
+  range = c(4.2, 10.5),
+  breaks = sort(
+    unique(plot_df$foreground_count)
+  )
+) +
+  
+  # ----------------------------------------------------------
+# Bubble color
+# ----------------------------------------------------------
+scale_color_gradient(
+  name = "-log10(P value)",
+  low = color_low,
+  high = color_high
+) +
+  
+  # ----------------------------------------------------------
+# X-axis spacing
+# ----------------------------------------------------------
+scale_x_continuous(
+  expand = expansion(
+    mult = c(0.10, 0.18)
+  )
+) +
+  
+  # ----------------------------------------------------------
+# Axis titles
+# ----------------------------------------------------------
+labs(
+  x = "Gene ratio",
+  y = NULL
+) +
+  
+  # ----------------------------------------------------------
+# Theme
+# ----------------------------------------------------------
+theme_classic(
+  base_family = "TNR",
+  base_size = 14
+) +
+  
+  theme(
+    
+    # all text
+    text = element_text(
+      family = "TNR",
+      face = "bold",
+      color = "black"
+    ),
+    
+    # white background
+    panel.background = element_rect(
+      fill = "white",
+      color = NA
+    ),
+    
+    plot.background = element_rect(
+      fill = "white",
+      color = NA
+    ),
+    
+    # X title
+    axis.title.x = element_text(
+      family = "TNR",
+      size = 18,
+      face = "bold",
+      margin = margin(t = 8)
+    ),
+    
+    # X ticks
+    axis.text.x = element_text(
+      family = "TNR",
+      size = 13,
+      face = "bold",
+      color = "black"
+    ),
+    
+    # pathway names
+    axis.text.y = ggtext::element_markdown(
+      size = 9.5,
+      face = "bold",
+      color = "black"
+    ),
+    
+    # --------------------------------------------------------
+    # Four-sided border
+    # --------------------------------------------------------
+    axis.line = element_blank(),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    axis.ticks = element_line(
+      linewidth = 1.0,
+      color = "black"
+    ),
+    
+    axis.ticks.length = unit(
+      0.16,
+      "cm"
+    ),
+    
+    # --------------------------------------------------------
+    # Legends
+    # --------------------------------------------------------
+    legend.title = element_text(
+      family = "TNR",
+      size = 13,
+      face = "bold"
+    ),
+    
+    legend.text = element_text(
+      family = "TNR",
+      size = 11,
+      face = "bold"
+    ),
+    
+    legend.key.height = unit(
+      0.55,
+      "cm"
+    ),
+    
+    legend.key.width = unit(
+      0.55,
+      "cm"
+    ),
+    
+    legend.spacing.y = unit(
+      0.15,
+      "cm"
+    ),
+    
+    plot.margin = margin(
+      t = 8,
+      r = 16,
+      b = 8,
+      l = 8
+    )
+  ) +
+  
+  guides(
+    size = guide_legend(
+      order = 1,
+      override.aes = list(
+        alpha = 1
+      )
+    ),
+    
+    color = guide_colorbar(
+      order = 2,
+      barheight = unit(
+        3.0,
+        "cm"
+      ),
+      barwidth = unit(
+        0.45,
+        "cm"
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+# Show
+# ------------------------------------------------------------
+print(p_kegg_metab)
+
+# ------------------------------------------------------------
+# Check displayed pathways
+# ------------------------------------------------------------
+print(
+  plot_df %>%
+    select(
+      pathway_id,
+      pathway_name,
+      foreground_count,
+      GeneRatio,
+      FoldEnrichment,
+      P,
+      FDR
+    ) %>%
+    arrange(P)
+)
+
+# Export PDF — stable version
+# ============================================================
+
+graphics.off()
+
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig5C_metabolite_KEGG_Top20_FINAL.pdf"
+)
+
+
+showtext::showtext_auto()
+
+ggplot2::ggsave(
+  filename = pdf_file,
+  plot = p_kegg_metab,
+  width = 8.5,
+  height = 7.0,
+  units = "in",
+  device = grDevices::cairo_pdf,
+  bg = "white"
+)
+
+cat(
+  "\nPDF saved successfully:\n",
+  pdf_file,
+  "\nFile size:",
+  file.info(pdf_file)$size,
+  "bytes\n"
+)
