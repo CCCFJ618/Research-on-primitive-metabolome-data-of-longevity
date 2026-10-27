@@ -1,0 +1,344 @@
+# ============================================================
+# Fig 6F
+# ============================================================
+
+# ============================================================
+# Packages
+# ============================================================
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(grid)
+
+# ============================================================
+# File path
+# ============================================================
+kegg_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "长寿老人/长寿老人/老人-代谢组/",
+  "115样本_差异代谢物_KEGG富集结果.xlsx"
+)
+
+# ============================================================
+# Read data
+# ============================================================
+kegg_df <- read_excel(kegg_file)
+
+# ============================================================
+# alpha-KG info
+# ============================================================
+alpha_kegg_id <- "C00026"
+alpha_name <- "Oxoglutaric acid (alpha-KG)"
+
+# ============================================================
+# Clean data
+# ============================================================
+kegg_clean <- kegg_df %>%
+  mutate(
+    pathway_id   = as.character(pathway_id),
+    pathway_name = as.character(pathway_name),
+    Compound_list = as.character(Compound_list),
+    P   = as.numeric(P),
+    FDR = suppressWarnings(as.numeric(FDR))
+  ) %>%
+  filter(
+    !is.na(pathway_id), pathway_id != "",
+    !is.na(pathway_name), pathway_name != "",
+    !is.na(Compound_list), Compound_list != ""
+  )
+
+# ============================================================
+# Expand pathway-compound relationship
+# ============================================================
+pathway_compound <- kegg_clean %>%
+  select(pathway_id, pathway_name, P, FDR, Compound_list) %>%
+  separate_rows(Compound_list, sep = ";") %>%
+  mutate(
+    KEGG_ID = trimws(Compound_list)
+  ) %>%
+  filter(
+    grepl("^C[0-9]{5}$", KEGG_ID)
+  ) %>%
+  select(pathway_id, pathway_name, P, FDR, KEGG_ID) %>%
+  distinct()
+
+# ============================================================
+# Keep pathways containing alpha-KG
+# ============================================================
+alpha_pathways <- pathway_compound %>%
+  filter(KEGG_ID == alpha_kegg_id) %>%
+  distinct(pathway_id, pathway_name, P, FDR) %>%
+  arrange(P)
+
+cat("\n========================================\n")
+cat("alpha-KG-associated KEGG pathways\n")
+cat("========================================\n")
+print(alpha_pathways, n = Inf)
+cat("\nTotal pathways containing alpha-KG:", nrow(alpha_pathways), "\n")
+
+if (nrow(alpha_pathways) == 0) {
+  stop("No KEGG pathway containing alpha-KG (C00026) was found.")
+}
+
+# ============================================================
+# Colors
+# ============================================================
+col_alpha_fill <- "#4F8F83"
+col_alpha      <- "#B85C5C"
+col_pathway    <- "#788A99"
+col_path_text  <- "#4F5962"
+col_edge       <- "#A8A8A8"
+
+# ============================================================
+# Highlight pathways
+# ============================================================
+highlight_pathways <- c(
+  "Citrate cycle (TCA cycle)",
+  "Alanine, aspartate and glutamate metabolism",
+  "Arginine biosynthesis",
+  "Lysine degradation",
+  "Glyoxylate and dicarboxylate metabolism",
+  "2-Oxocarboxylic acid metabolism",
+  "Central carbon metabolism",
+  "Central carbon metabolism in cancer",
+  "Carbon metabolism",
+  "HIF-1 signaling pathway",
+  "Bile secretion"
+)
+
+# ============================================================
+# Arrange pathways around a circle
+# ============================================================
+pathway_nodes <- alpha_pathways %>%
+  arrange(P) %>%
+  mutate(pathway_order = row_number())
+
+n_pathway <- nrow(pathway_nodes)
+
+pathway_angles <- seq(
+  from = pi / 2,
+  to = pi / 2 - 2 * pi,
+  length.out = n_pathway + 1
+)[1:n_pathway]
+
+pathway_radius <- 3.4
+
+pathway_nodes <- pathway_nodes %>%
+  mutate(
+    angle = pathway_angles,
+    node_x = pathway_radius * cos(angle),
+    node_y = pathway_radius * sin(angle)
+  )
+
+# ============================================================
+# Label positions
+# ============================================================
+path_label_radius <- 4.1
+
+pathway_nodes <- pathway_nodes %>%
+  mutate(
+    angle_deg = angle * 180 / pi,
+    
+    label_angle = ifelse(
+      cos(angle) < 0,
+      angle_deg + 180,
+      angle_deg
+    ),
+    
+    label_hjust = ifelse(
+      cos(angle) < 0,
+      1,
+      0
+    ),
+    
+    label_x = path_label_radius * cos(angle),
+    label_y = path_label_radius * sin(angle),
+    
+    pathway_label = stringr::str_wrap(pathway_name, width = 28),
+    
+    highlight = pathway_name %in% highlight_pathways
+  )
+
+# ============================================================
+# STRAIGHT edges from alpha-KG to pathway nodes
+# ============================================================
+edge_alpha_pathway <- pathway_nodes %>%
+  transmute(
+    x0 = 0,
+    y0 = 0,
+    x1 = node_x,
+    y1 = node_y
+  )
+
+# ============================================================
+# Plot
+# ============================================================
+p_alpha_pathway <- ggplot() +
+  
+  # ----------------------------------------------------------
+# Straight lines: alpha-KG -> pathway
+# ----------------------------------------------------------
+geom_segment(
+  data = edge_alpha_pathway,
+  aes(
+    x = x0,
+    y = y0,
+    xend = x1,
+    yend = y1
+  ),
+  color = col_edge,
+  linewidth = 0.9,
+  alpha = 0.85,
+  lineend = "round"
+) +
+  
+  # ----------------------------------------------------------
+# Pathway nodes
+# ----------------------------------------------------------
+geom_point(
+  data = pathway_nodes,
+  aes(
+    x = node_x,
+    y = node_y
+  ),
+  shape = 22,
+  size = 4.8,
+  fill = col_pathway,
+  color = "white",
+  stroke = 0.7
+) +
+  
+  # ----------------------------------------------------------
+# Non-highlight pathway labels
+# ----------------------------------------------------------
+geom_text(
+  data = pathway_nodes %>% filter(!highlight),
+  aes(
+    x = label_x,
+    y = label_y,
+    label = pathway_label,
+    angle = label_angle,
+    hjust = label_hjust
+  ),
+  family = "Arial",
+  fontface = "bold",
+  size = 3.0,
+  color = col_path_text,
+  lineheight = 0.92
+) +
+  
+  # ----------------------------------------------------------
+# Highlighted pathway labels
+# ----------------------------------------------------------
+geom_text(
+  data = pathway_nodes %>% filter(highlight),
+  aes(
+    x = label_x,
+    y = label_y,
+    label = pathway_label,
+    angle = label_angle,
+    hjust = label_hjust
+  ),
+  family = "Arial",
+  fontface = "bold",
+  size = 3.0,
+  color = col_alpha,
+  lineheight = 0.92
+) +
+  
+  # ----------------------------------------------------------
+# Central alpha-KG node
+# ----------------------------------------------------------
+geom_point(
+  aes(x = 0, y = 0),
+  shape = 21,
+  size = 10.5,
+  fill = col_alpha_fill,
+  color = col_alpha,
+  stroke = 1.9
+) +
+  
+  # ----------------------------------------------------------
+# Central label
+# ----------------------------------------------------------
+annotate(
+  "text",
+  x = 0,
+  y = -0.55,
+  label = alpha_name,
+  family = "Arial",
+  fontface = "bold",
+  size = 5.0,
+  color = col_alpha
+) +
+  
+  coord_equal(
+    xlim = c(-6.2, 6.2),
+    ylim = c(-6.2, 6.2),
+    clip = "off"
+  ) +
+  
+  theme_void(base_family = "Arial") +
+  theme(
+    text = element_text(
+      family = "Arial",
+      face = "bold",
+      color = "black"
+    ),
+    panel.background = element_rect(
+      fill = "white",
+      color = NA
+    ),
+    plot.background = element_rect(
+      fill = "white",
+      color = NA
+    ),
+    legend.position = "none",
+    plot.margin = margin(
+      t = 25,
+      r = 65,
+      b = 25,
+      l = 65
+    )
+  )
+
+# ============================================================
+# Preview
+# ============================================================
+print(p_alpha_pathway)
+
+# ============================================================
+# Export pathway table
+# ============================================================
+write.csv(
+  alpha_pathways,
+  "C:/Users/Administrator/Desktop/Fig5E_alphaKG_pathways_ONLY.csv",
+  row.names = FALSE
+)
+
+# ============================================================
+# Export PDF
+# ============================================================
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig5E_alphaKG_KEGG_pathway_network_FINAL.pdf"
+)
+
+if (file.exists(pdf_file)) {
+  file.remove(pdf_file)
+}
+
+grDevices::cairo_pdf(
+  filename = pdf_file,
+  width = 9,
+  height = 9,
+  family = "Arial"
+)
+
+print(p_alpha_pathway)
+
+grDevices::dev.off()
+
+cat("\nPDF saved to:\n", pdf_file, "\n")
