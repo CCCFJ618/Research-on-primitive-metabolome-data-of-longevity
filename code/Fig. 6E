@@ -1,0 +1,1215 @@
+# ============================================================
+# Fig5D
+# Metabolite-Metabolite Spearman Correlation Network
+# ============================================================
+
+# ============================================================
+# Packages
+# ============================================================
+
+library(openxlsx)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tibble)
+library(Hmisc)
+library(igraph)
+library(ggraph)
+library(ggplot2)
+library(scales)
+# ============================================================
+# File paths
+# ============================================================
+
+file_kegg <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "长寿老人/长寿老人/老人-代谢组/",
+  "115样本_差异代谢物_KEGG富集结果.xlsx"
+)
+
+file_raw <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "长寿老人/长寿老人/老人-代谢组/",
+  "115样本_原始代谢组数据.xlsx"
+)
+
+file_diff <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "长寿老人/长寿老人/老人-代谢组/",
+  "代谢差异分析_Longevity_vs_Middle_old.xlsx"
+)
+
+
+# ============================================================
+# Read data
+# ============================================================
+
+kegg_df <- openxlsx::read.xlsx(
+  file_kegg
+)
+
+raw_df <- openxlsx::read.xlsx(
+  file_raw
+)
+
+diff_df <- openxlsx::read.xlsx(
+  file_diff
+)
+
+
+# ============================================================
+# Clean column names
+# ============================================================
+
+clean_names_simple <- function(x) {
+  
+  x <- gsub(
+    "[^[:alnum:]]+",
+    "_",
+    x
+  )
+  
+  x <- gsub(
+    "^_|_$",
+    "",
+    x
+  )
+  
+  x <- tolower(
+    x
+  )
+  
+  x
+}
+
+
+colnames(kegg_df) <- clean_names_simple(
+  colnames(kegg_df)
+)
+
+colnames(raw_df) <- clean_names_simple(
+  colnames(raw_df)
+)
+
+colnames(diff_df) <- clean_names_simple(
+  colnames(diff_df)
+)
+
+
+# ============================================================
+# Helper: automatically find column
+# ============================================================
+
+find_col <- function(
+    df,
+    candidates
+) {
+  
+  hit <- intersect(
+    candidates,
+    colnames(df)
+  )
+  
+  if (
+    length(hit) == 0
+  ) {
+    
+    stop(
+      paste0(
+        "Cannot find column. Candidates tried: ",
+        paste(
+          candidates,
+          collapse = ", "
+        )
+      )
+    )
+  }
+  
+  hit[1]
+}
+
+
+# ============================================================
+# Identify required columns
+# ============================================================
+
+# ------------------------------------------------------------
+# KEGG table
+# ------------------------------------------------------------
+
+col_compounds <- find_col(
+  kegg_df,
+  c(
+    "compound_list",
+    "compound"
+  )
+)
+
+
+# ------------------------------------------------------------
+# Differential metabolite table
+# ------------------------------------------------------------
+
+col_metab_id <- find_col(
+  diff_df,
+  c(
+    "metab_id"
+  )
+)
+
+col_metabolite <- find_col(
+  diff_df,
+  c(
+    "metabolite"
+  )
+)
+
+col_direction <- find_col(
+  diff_df,
+  c(
+    "direction"
+  )
+)
+
+col_p <- find_col(
+  diff_df,
+  c(
+    "p"
+  )
+)
+
+col_fdr <- find_col(
+  diff_df,
+  c(
+    "fdr"
+  )
+)
+
+col_has_name <- find_col(
+  diff_df,
+  c(
+    "has_name"
+  )
+)
+
+col_has_kegg <- find_col(
+  diff_df,
+  c(
+    "has_kegg"
+  )
+)
+
+col_kegg_id <- find_col(
+  diff_df,
+  c(
+    "kegg_compound_id",
+    "kegg_compound",
+    "kegg_id"
+  )
+)
+
+
+# ------------------------------------------------------------
+# Raw abundance table
+# ------------------------------------------------------------
+
+col_raw_metab_id <- find_col(
+  raw_df,
+  c(
+    "metab_id"
+  )
+)
+
+
+# ============================================================
+# Standardize tables
+# ============================================================
+
+kegg_use <- kegg_df %>%
+  transmute(
+    compound_list =
+      as.character(
+        .data[[col_compounds]]
+      )
+  )
+
+
+diff_use <- diff_df %>%
+  transmute(
+    
+    metab_id =
+      as.character(
+        .data[[col_metab_id]]
+      ),
+    
+    Metabolite =
+      as.character(
+        .data[[col_metabolite]]
+      ),
+    
+    Direction =
+      as.character(
+        .data[[col_direction]]
+      ),
+    
+    p =
+      as.numeric(
+        .data[[col_p]]
+      ),
+    
+    FDR =
+      suppressWarnings(
+        as.numeric(
+          .data[[col_fdr]]
+        )
+      ),
+    
+    has_name =
+      as.logical(
+        .data[[col_has_name]]
+      ),
+    
+    has_KEGG =
+      as.logical(
+        .data[[col_has_kegg]]
+      ),
+    
+    KEGG_ID =
+      trimws(
+        as.character(
+          .data[[col_kegg_id]]
+        )
+      )
+  )
+
+
+raw_use <- raw_df
+
+raw_use[[col_raw_metab_id]] <- as.character(
+  raw_use[[col_raw_metab_id]]
+)
+
+
+# ------------------------------------------------------------
+# Sample columns
+# ------------------------------------------------------------
+
+sample_cols <- setdiff(
+  colnames(raw_use),
+  col_raw_metab_id
+)
+
+
+raw_use[sample_cols] <- lapply(
+  raw_use[sample_cols],
+  as.numeric
+)
+
+
+# ============================================================
+# Get ALL KEGG compounds from ALL enriched pathways
+# ============================================================
+
+all_kegg_compounds <- kegg_use %>%
+  
+  filter(
+    !is.na(compound_list),
+    compound_list != ""
+  ) %>%
+  
+  tidyr::separate_rows(
+    compound_list,
+    sep = ";"
+  ) %>%
+  
+  mutate(
+    KEGG_ID =
+      stringr::str_trim(
+        compound_list
+      )
+  ) %>%
+  
+  filter(
+    !is.na(KEGG_ID),
+    KEGG_ID != ""
+  ) %>%
+  
+  distinct(
+    KEGG_ID
+  )
+
+
+cat(
+  "\nNumber of KEGG compounds =",
+  nrow(all_kegg_compounds),
+  "\n"
+)
+
+
+# ============================================================
+# Candidate metabolites
+#
+# named
+# + KEGG annotated
+# + present in enriched KEGG pathways
+# ============================================================
+
+candidate_nodes <- diff_use %>%
+  
+  filter(
+    has_name == TRUE,
+    has_KEGG == TRUE,
+    !is.na(Metabolite),
+    Metabolite != "",
+    !is.na(KEGG_ID),
+    KEGG_ID != ""
+  ) %>%
+  
+  semi_join(
+    all_kegg_compounds,
+    by = "KEGG_ID"
+  ) %>%
+  
+  distinct(
+    metab_id,
+    .keep_all = TRUE
+  )
+
+
+cat(
+  "\nCandidate metabolites =",
+  nrow(candidate_nodes),
+  "\n"
+)
+
+
+# ============================================================
+# Build metabolite × sample abundance matrix
+# ============================================================
+
+abund_mat_all <- raw_use %>%
+  
+  tibble::column_to_rownames(
+    col_raw_metab_id
+  ) %>%
+  
+  as.matrix()
+
+
+mode(
+  abund_mat_all
+) <- "numeric"
+
+
+# ------------------------------------------------------------
+# Keep candidates present in abundance matrix
+# ------------------------------------------------------------
+
+candidate_nodes <- candidate_nodes %>%
+  
+  mutate(
+    in_abundance =
+      metab_id %in%
+      rownames(
+        abund_mat_all
+      )
+  ) %>%
+  
+  filter(
+    in_abundance
+  )
+
+
+cat(
+  "Present in abundance matrix =",
+  nrow(candidate_nodes),
+  "\n"
+)
+
+
+# ------------------------------------------------------------
+# Extract candidate metabolite abundance
+# ------------------------------------------------------------
+
+abund_sub <- abund_mat_all[
+  candidate_nodes$metab_id,
+  ,
+  drop = FALSE
+]
+
+
+# ============================================================
+# Remove zero-variance metabolites
+# ============================================================
+
+keep_var <- apply(
+  
+  abund_sub,
+  
+  1,
+  
+  function(x) {
+    
+    x <- as.numeric(
+      x
+    )
+    
+    sd(
+      x,
+      na.rm = TRUE
+    ) > 0
+  }
+)
+
+
+abund_sub <- abund_sub[
+  keep_var,
+  ,
+  drop = FALSE
+]
+
+
+candidate_nodes <- candidate_nodes %>%
+  filter(
+    metab_id %in%
+      rownames(
+        abund_sub
+      )
+  )
+
+
+cat(
+  "Metabolites used for correlation =",
+  nrow(candidate_nodes),
+  "\n"
+)
+
+
+# ============================================================
+# Spearman correlation
+# ============================================================
+
+rc <- Hmisc::rcorr(
+  t(
+    abund_sub
+  ),
+  type = "spearman"
+)
+
+
+rho_mat <- rc$r
+p_mat <- rc$P
+
+
+# ------------------------------------------------------------
+# Extract upper triangle
+# ------------------------------------------------------------
+
+upper_idx <- which(
+  upper.tri(
+    rho_mat
+  ),
+  arr.ind = TRUE
+)
+
+
+edges_all <- tibble::tibble(
+  
+  from =
+    colnames(
+      rho_mat
+    )[
+      upper_idx[, 1]
+    ],
+  
+  to =
+    colnames(
+      rho_mat
+    )[
+      upper_idx[, 2]
+    ],
+  
+  rho =
+    rho_mat[
+      upper_idx
+    ],
+  
+  p =
+    p_mat[
+      upper_idx
+    ]
+) %>%
+  
+  mutate(
+    
+    FDR =
+      p.adjust(
+        p,
+        method = "BH"
+      ),
+    
+    abs_rho =
+      abs(
+        rho
+      ),
+    
+    sign =
+      ifelse(
+        rho >= 0,
+        "Positive",
+        "Negative"
+      )
+  )
+
+
+# ============================================================
+# Edge threshold
+# ============================================================
+
+rho_cutoff <- 0.50
+fdr_cutoff <- 0.05
+
+
+edges_final <- edges_all %>%
+  
+  filter(
+    !is.na(rho),
+    !is.na(FDR),
+    abs_rho >= rho_cutoff,
+    FDR < fdr_cutoff
+  )
+
+
+cat(
+  "\nFinal edges =",
+  nrow(edges_final),
+  "\n"
+)
+
+
+# ============================================================
+# Final nodes
+# ============================================================
+
+final_node_ids <- unique(
+  c(
+    edges_final$from,
+    edges_final$to
+  )
+)
+
+
+node_df <- candidate_nodes %>%
+  
+  filter(
+    metab_id %in%
+      final_node_ids
+  ) %>%
+  
+  mutate(
+    
+    Direction_plot =
+      case_when(
+        
+        Direction %in%
+          c(
+            "Up",
+            "UP",
+            "up"
+          ) ~
+          "Up",
+        
+        Direction %in%
+          c(
+            "Down",
+            "DOWN",
+            "down"
+          ) ~
+          "Down",
+        
+        TRUE ~
+          "Other"
+      ),
+    
+    is_alphaKG =
+      trimws(
+        Metabolite
+      ) ==
+      "Oxoglutaric acid"
+  )
+
+
+cat(
+  "Final nodes =",
+  nrow(node_df),
+  "\n"
+)
+
+
+# ============================================================
+# Check alpha-KG
+# ============================================================
+
+cat(
+  "\n================ Oxoglutaric acid ================\n"
+)
+
+
+print(
+  node_df %>%
+    filter(
+      is_alphaKG
+    )
+)
+
+
+# ============================================================
+# Build graph
+# ============================================================
+
+g <- igraph::graph_from_data_frame(
+  
+  d =
+    edges_final %>%
+    select(
+      from,
+      to,
+      rho,
+      p,
+      FDR,
+      abs_rho,
+      sign
+    ),
+  
+  directed =
+    FALSE,
+  
+  vertices =
+    node_df
+)
+
+
+# ============================================================
+# Node degree
+# ============================================================
+
+igraph::V(g)$degree <- igraph::degree(
+  g
+)
+
+
+deg_scaled <- scales::rescale(
+  igraph::V(g)$degree,
+  to = c(
+    3.5,
+    7.5
+  )
+)
+
+
+igraph::V(g)$node_size <- deg_scaled
+
+
+# ------------------------------------------------------------
+# Make alpha-KG larger
+# ------------------------------------------------------------
+
+if (
+  any(
+    igraph::V(g)$Metabolite ==
+    "Oxoglutaric acid"
+  )
+) {
+  
+  igraph::V(g)$node_size[
+    igraph::V(g)$Metabolite ==
+      "Oxoglutaric acid"
+  ] <-
+    max(
+      deg_scaled,
+      na.rm = TRUE
+    ) +
+    1.8
+}
+
+
+# ============================================================
+# Layout
+# ============================================================
+
+set.seed(
+  123
+)
+
+
+lay <- ggraph::create_layout(
+  g,
+  layout = "fr"
+)
+
+
+# ============================================================
+# Colors
+# ============================================================
+
+# Node colors
+col_up <- "#4F8F83"
+col_down <- "#D9A34A"
+col_other <- "#BFBFBF"
+
+# alpha-KG
+col_alpha <- "#B85C5C"
+
+# Edge colors
+col_edge_pos <- "#AFCFCA"
+col_edge_neg <- "#E7C4A8"
+
+
+# ============================================================
+# Plot
+# ============================================================
+
+p_net <- ggraph::ggraph(
+  lay
+) +
+  
+  # ----------------------------------------------------------
+# Edges
+# ----------------------------------------------------------
+ggraph::geom_edge_link(
+  
+  aes(
+    edge_width =
+      abs_rho,
+    
+    edge_color =
+      sign
+  ),
+  
+  alpha =
+    0.50,
+  
+  lineend =
+    "round",
+  
+  show.legend =
+    TRUE
+) +
+  
+  # ----------------------------------------------------------
+# Ordinary nodes
+# ----------------------------------------------------------
+ggraph::geom_node_point(
+  
+  aes(
+    size =
+      node_size,
+    
+    fill =
+      Direction_plot
+  ),
+  
+  shape =
+    21,
+  
+  color =
+    "white",
+  
+  stroke =
+    0.5
+) +
+  
+  # ----------------------------------------------------------
+# alpha-KG overlay
+# red outline
+# ----------------------------------------------------------
+ggraph::geom_node_point(
+  
+  data =
+    lay %>%
+    filter(
+      Metabolite ==
+        "Oxoglutaric acid"
+    ),
+  
+  aes(
+    x =
+      x,
+    
+    y =
+      y,
+    
+    size =
+      node_size,
+    
+    fill =
+      Direction_plot
+  ),
+  
+  shape =
+    21,
+  
+  color =
+    col_alpha,
+  
+  stroke =
+    1.6,
+  
+  show.legend =
+    FALSE
+) +
+  
+  # ----------------------------------------------------------
+# alpha-KG label
+#
+# IMPORTANT:
+# Arial
+# ordinary geom_text
+# NO showtext
+# ----------------------------------------------------------
+geom_text(
+  
+  data =
+    lay %>%
+    filter(
+      Metabolite ==
+        "Oxoglutaric acid"
+    ),
+  
+  aes(
+    x =
+      x +
+      0.225,
+    
+    y =
+      y +
+      0.020,
+    
+    label =
+      "Oxoglutaric acid"
+  ),
+  
+  color =
+    col_alpha,
+  
+  family =
+    "Arial",
+  
+  fontface =
+    "bold",
+  
+  size =
+    5.4,
+  
+  hjust =
+    0,
+  
+  vjust =
+    0.5
+) +
+  
+  # ==========================================================
+# Node colors
+# ==========================================================
+scale_fill_manual(
+  
+  name =
+    NULL,
+  
+  values =
+    c(
+      "Up" =
+        col_up,
+      
+      "Down" =
+        col_down,
+      
+      "Other" =
+        col_other
+    ),
+  
+  breaks =
+    c(
+      "Up",
+      "Down",
+      "Other"
+    ),
+  
+  labels =
+    c(
+      "Up",
+      "Down",
+      "Other"
+    )
+) +
+  
+  # ==========================================================
+# Edge colors
+# ==========================================================
+ggraph::scale_edge_color_manual(
+  
+  name =
+    "Correlation",
+  
+  values =
+    c(
+      "Positive" =
+        col_edge_pos,
+      
+      "Negative" =
+        col_edge_neg
+    )
+) +
+  
+  # ----------------------------------------------------------
+# Edge width
+# ----------------------------------------------------------
+ggraph::scale_edge_width(
+  
+  range =
+    c(
+      0.35,
+      1.8
+    ),
+  
+  guide =
+    "none"
+) +
+  
+  # ----------------------------------------------------------
+# Node size already calculated
+# ----------------------------------------------------------
+scale_size_identity(
+  guide =
+    "none"
+) +
+  
+  # ==========================================================
+# Theme
+# ==========================================================
+theme_void(
+  base_family =
+    "Arial"
+) +
+  
+  theme(
+    
+    text =
+      element_text(
+        family =
+          "Arial",
+        color =
+          "black"
+      ),
+    
+    plot.background =
+      element_rect(
+        fill =
+          "white",
+        color =
+          NA
+      ),
+    
+    panel.background =
+      element_rect(
+        fill =
+          "white",
+        color =
+          NA
+      ),
+    
+    # --------------------------------------------------------
+    # Legend
+    # --------------------------------------------------------
+    legend.position =
+      "right",
+    
+    legend.title =
+      element_text(
+        family =
+          "Arial",
+        face =
+          "bold",
+        size =
+          12,
+        color =
+          "black"
+      ),
+    
+    legend.text =
+      element_text(
+        family =
+          "Arial",
+        face =
+          "bold",
+        size =
+          11,
+        color =
+          "black"
+      ),
+    
+    legend.key =
+      element_rect(
+        fill =
+          "white",
+        color =
+          NA
+      ),
+    
+    # --------------------------------------------------------
+    # Margin
+    # --------------------------------------------------------
+    plot.margin =
+      margin(
+        t =
+          8,
+        r =
+          8,
+        b =
+          8,
+        l =
+          8
+      )
+  ) +
+  
+  # ==========================================================
+# Legends
+# ==========================================================
+guides(
+  
+  fill =
+    guide_legend(
+      
+      order =
+        1,
+      
+      override.aes =
+        list(
+          size =
+            5,
+          
+          shape =
+            21,
+          
+          color =
+            "white",
+          
+          stroke =
+            0.5
+        )
+    ),
+  
+  edge_color =
+    guide_legend(
+      
+      order =
+        2,
+      
+      override.aes =
+        list(
+          edge_width =
+            2.5,
+          
+          alpha =
+            1
+        )
+    )
+)
+
+
+# ============================================================
+# Show plot
+# ============================================================
+
+print(
+  p_net
+)
+
+
+# ============================================================
+# Export edge table
+# ============================================================
+
+write.csv(
+  
+  edges_final,
+  
+  "C:/Users/Administrator/Desktop/Fig5D_metabolite_network_edges_FINAL.csv",
+  
+  row.names =
+    FALSE
+)
+
+
+# ============================================================
+# Export node table
+# ============================================================
+
+write.csv(
+  
+  node_df,
+  
+  "C:/Users/Administrator/Desktop/Fig5D_metabolite_network_nodes_FINAL.csv",
+  
+  row.names =
+    FALSE
+)
+
+
+# ============================================================
+# Export PDF
+#
+# IMPORTANT:
+# NO showtext
+# Arial
+# Cairo PDF
+# Editable text
+# ============================================================
+
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig5D_metabolite_network_FINAL_TEXT.pdf"
+)
+
+
+if (
+  file.exists(
+    pdf_file
+  )
+) {
+  
+  file.remove(
+    pdf_file
+  )
+}
+
+
+grDevices::cairo_pdf(
+  
+  filename =
+    pdf_file,
+  
+  width =
+    10,
+  
+  height =
+    8,
+  
+  family =
+    "Arial"
+)
+
+
+print(
+  p_net
+)
+
+
+grDevices::dev.off()
+
+
+cat(
+  "\nPDF saved successfully to:\n",
+  pdf_file,
+  "\n"
+)
