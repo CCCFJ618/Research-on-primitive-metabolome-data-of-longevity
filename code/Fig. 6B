@@ -1,0 +1,392 @@
+# ============================================================
+# Fig5B
+# Differential metabolite volcano plot
+# ============================================================
+# ------------------------------------------------------------
+# Packages
+# ------------------------------------------------------------
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggrepel)
+library(stringr)
+library(grid)
+
+# ------------------------------------------------------------
+# Clean age metadata
+# Group:
+#   Age >= 90  -> Longevity
+#   Age < 90   -> Non-longevity
+# ------------------------------------------------------------
+meta_df <- age_df %>%
+  transmute(
+    Sample = as.character(Sample),
+    Age = as.numeric(Age),
+    Group = ifelse(Age >= 90, "Longevity", "Non-longevity")
+  ) %>%
+  filter(
+    !is.na(Sample),
+    !is.na(Age),
+    !is.na(Group)
+  )
+
+cat("\nGroup summary:\n")
+print(table(meta_df$Group))
+
+# ------------------------------------------------------------
+# Clean metabolomics matrix
+# ------------------------------------------------------------
+metab_df <- metab_real
+
+colnames(metab_df)[1] <- "metab_id"
+
+metab_df <- metab_df %>%
+  mutate(
+    metab_id = as.character(metab_id)
+  )
+
+# ------------------------------------------------------------
+# Convert to long format
+# ------------------------------------------------------------
+metab_long <- metab_df %>%
+  pivot_longer(
+    cols = -metab_id,
+    names_to = "Sample",
+    values_to = "Abundance"
+  ) %>%
+  mutate(
+    Sample = as.character(Sample),
+    Abundance = as.numeric(Abundance)
+  ) %>%
+  filter(
+    !is.na(Sample),
+    !is.na(Abundance)
+  ) %>%
+  inner_join(
+    meta_df,
+    by = "Sample"
+  )
+
+cat("\nMatched samples in metabolomics matrix:\n")
+print(length(unique(metab_long$Sample)))
+print(table(metab_long$Group))
+
+# ------------------------------------------------------------
+# Differential analysis by Wilcoxon test
+# ------------------------------------------------------------
+diff_res <- metab_long %>%
+  group_by(metab_id) %>%
+  summarise(
+    mean_longevity = mean(Abundance[Group == "Longevity"], na.rm = TRUE),
+    mean_nonlongevity = mean(Abundance[Group == "Non-longevity"], na.rm = TRUE),
+    p = tryCatch(
+      wilcox.test(
+        Abundance ~ Group,
+        exact = FALSE
+      )$p.value,
+      error = function(e) NA_real_
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    FDR = p.adjust(p, method = "BH")
+  )
+
+# ------------------------------------------------------------
+# Pseudocount
+# ------------------------------------------------------------
+all_nonzero <- c(
+  diff_res$mean_longevity[diff_res$mean_longevity > 0],
+  diff_res$mean_nonlongevity[diff_res$mean_nonlongevity > 0]
+)
+
+pseudo <- min(all_nonzero, na.rm = TRUE) / 2
+
+cat("\nPseudocount =", pseudo, "\n")
+
+# ------------------------------------------------------------
+# Fold change + significance
+# log2FC > 0 : higher in Longevity
+# log2FC < 0 : higher in Non-longevity
+# ------------------------------------------------------------
+diff_res <- diff_res %>%
+  mutate(
+    log2FC = log2(
+      (mean_longevity + pseudo) /
+        (mean_nonlongevity + pseudo)
+    ),
+    neglog10P = -log10(p),
+    Group = case_when(
+      p < 0.05 & log2FC > 0 ~ "Longevity",
+      p < 0.05 & log2FC < 0 ~ "Non-longevity",
+      TRUE ~ "NS"
+    )
+  )
+
+# ------------------------------------------------------------
+# Add metabolite names
+# ------------------------------------------------------------
+
+if (exists("metab_annotation")) {
+  
+  anno_df <- metab_annotation
+  colnames(anno_df)[1] <- "metab_id"
+  
+  name_col <- c("Metabolite", "metabolite", "Name", "name", "Compound", "compound_name")
+  name_col <- name_col[name_col %in% colnames(anno_df)][1]
+  
+  if (is.na(name_col)) {
+    stop("metab_annotation 中没有找到代谢物名称列，请至少包含一列，如 Metabolite")
+  }
+  
+  anno_df <- anno_df %>%
+    transmute(
+      metab_id = as.character(metab_id),
+      Metabolite = as.character(.data[[name_col]])
+    )
+  
+  plot_df <- diff_res %>%
+    left_join(
+      anno_df,
+      by = "metab_id"
+    ) %>%
+    mutate(
+      Metabolite = ifelse(
+        is.na(Metabolite) | Metabolite == "",
+        metab_id,
+        Metabolite
+      )
+    )
+  
+} else {
+  
+  plot_df <- diff_res %>%
+    mutate(
+      Metabolite = metab_id
+    )
+}
+
+# ------------------------------------------------------------
+# Target metabolites to label
+# ------------------------------------------------------------
+target_patterns <- tibble::tibble(
+  label_show = c(
+    "Oxoglutaric acid (α-KG)",
+    "Anserine",
+    "Docosahexaenoic acid (DHA)",
+    "N-Acetylputrescine",
+    "Biliverdin"
+  ),
+  pattern = c(
+    "Oxoglutaric acid|2-?Oxoglutaric acid|alpha-?ketoglutaric acid|α-?KG|alpha-?KG|2-?Oxoglutarate",
+    "^Anserine$|Anserine",
+    "Docosahexaenoic acid|\\bDHA\\b",
+    "N-?Acetylputrescine",
+    "^Biliverdin$|Biliverdin"
+  )
+)
+
+label_df <- lapply(
+  seq_len(nrow(target_patterns)),
+  function(i) {
+    
+    tmp <- plot_df %>%
+      filter(
+        str_detect(
+          Metabolite,
+          regex(target_patterns$pattern[i], ignore_case = TRUE)
+        )
+      )
+    
+    if (nrow(tmp) == 0) {
+      return(NULL)
+    }
+    
+    # 如果匹配到多行，只保留 P 最小的一行
+    tmp %>%
+      arrange(p) %>%
+      slice(1) %>%
+      mutate(label_show = target_patterns$label_show[i])
+  }
+) %>%
+  bind_rows()
+
+cat("\nMatched labeled metabolites:\n")
+print(
+  label_df %>%
+    select(
+      metab_id,
+      Metabolite,
+      label_show,
+      mean_longevity,
+      mean_nonlongevity,
+      log2FC,
+      p,
+      FDR,
+      Group
+    )
+)
+
+# ------------------------------------------------------------
+# Colors
+# ------------------------------------------------------------
+cols <- c(
+  "Non-longevity" = "#D9A66F",
+  "Longevity" = "#4F8F83",
+  "NS" = "#C8C8C8"
+)
+
+highlight_red <- "#B85C5C"
+
+# ------------------------------------------------------------
+# Volcano plot
+# ------------------------------------------------------------
+p_metab_volcano <- ggplot(
+  plot_df,
+  aes(
+    x = log2FC,
+    y = neglog10P,
+    color = Group
+  )
+) +
+  
+  geom_point(
+    size = 2.8,
+    alpha = 0.82
+  ) +
+  
+  # P = 0.05
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    linewidth = 0.75,
+    color = "#777777"
+  ) +
+  
+  # FC = 0
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.75,
+    color = "#777777"
+  ) +
+  
+  # label the 5 metabolites
+  geom_label_repel(
+    data = label_df,
+    aes(label = label_show),
+    family = "Arial",
+    fontface = "bold",
+    size = 4.2,
+    color = highlight_red,
+    fill = "white",
+    box.padding = 0.45,
+    point.padding = 0.35,
+    label.size = 0.55,
+    label.r = unit(0.10, "lines"),
+    label.padding = unit(0.18, "lines"),
+    segment.color = highlight_red,
+    segment.size = 0.55,
+    min.segment.length = 0,
+    max.overlaps = Inf,
+    show.legend = FALSE
+  ) +
+  
+  scale_color_manual(
+    values = cols,
+    breaks = c(
+      "Non-longevity",
+      "Longevity",
+      "NS"
+    )
+  ) +
+  
+  labs(
+    x = expression(log[2]~"(Longevity / Non-longevity)"),
+    y = expression(-log[10]~"(P value)"),
+    color = NULL
+  ) +
+  
+  theme_classic(base_family = "Arial") +
+  
+  theme(
+    text = element_text(
+      family = "Arial",
+      face = "bold",
+      color = "black"
+    ),
+    
+    axis.title.x = element_text(
+      size = 17,
+      margin = margin(t = 10)
+    ),
+    
+    axis.title.y = element_text(
+      size = 17,
+      margin = margin(r = 10)
+    ),
+    
+    axis.text = element_text(
+      size = 14,
+      color = "black"
+    ),
+    
+    axis.line = element_blank(),
+    
+    axis.ticks = element_line(
+      linewidth = 1,
+      color = "black"
+    ),
+    
+    axis.ticks.length = unit(
+      0.18,
+      "cm"
+    ),
+    
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 1.5
+    ),
+    
+    legend.position = c(
+      0.82,
+      0.90
+    ),
+    
+    legend.text = element_text(
+      size = 12.5,
+      face = "bold"
+    ),
+    
+    legend.key = element_blank(),
+    
+    aspect.ratio = 1,
+    
+    plot.margin = margin(
+      10, 16, 10, 10
+    )
+  )
+
+# ------------------------------------------------------------
+# Preview
+# ------------------------------------------------------------
+p_metab_volcano
+
+# ------------------------------------------------------------
+# 15. Export PDF
+# ------------------------------------------------------------
+ggsave(
+  filename = "C:/Users/Administrator/Desktop/Fig5B_metabolite_volcano_labeled5.pdf",
+  plot = p_metab_volcano,
+  width = 6.8,
+  height = 6.8,
+  units = "in",
+  device = cairo_pdf,
+  bg = "white"
+)
+
+cat(
+  "\nPDF exported successfully:\n",
+  "C:/Users/Administrator/Desktop/Fig5B_metabolite_volcano_labeled5.pdf\n"
+)
