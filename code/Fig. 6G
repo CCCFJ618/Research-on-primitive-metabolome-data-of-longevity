@@ -1,0 +1,681 @@
+# ============================================================
+# Fig6G
+# Bifidobacterium adolescentis vs Oxoglutaric acid
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Packages
+# ------------------------------------------------------------
+library(dplyr)
+library(ggplot2)
+
+# ------------------------------------------------------------
+# Parameters
+# ------------------------------------------------------------
+pseudo <- 1e-6
+
+col_point <- "#78C6C2"
+col_line  <- "#8E8E8E"
+col_stat  <- "#D64F4F"
+
+
+# ============================================================
+# Check required objects
+# ============================================================
+
+if (!exists("alpha_age_df")) {
+  stop(
+    "对象 alpha_age_df 不存在，请先运行前面的 alpha-KG + Age 数据整理代码。"
+  )
+}
+
+if (!exists("bado_115_long")) {
+  stop(
+    "对象 bado_115_long 不存在，请先运行 B. adolescentis 样本匹配代码。"
+  )
+}
+
+
+# ============================================================
+# Prepare alpha-KG table
+# ============================================================
+
+alpha_df <- alpha_age_df %>%
+  
+  dplyr::transmute(
+    
+    Sample =
+      as.character(
+        Sample
+      ),
+    
+    alphaKG =
+      as.numeric(
+        alphaKG
+      )
+    
+  ) %>%
+  
+  dplyr::filter(
+    
+    !is.na(
+      Sample
+    ),
+    
+    Sample != "",
+    
+    !is.na(
+      alphaKG
+    )
+  )
+
+
+# ============================================================
+# Prepare B. adolescentis table
+# ============================================================
+
+bado_df <- bado_115_long %>%
+  
+  dplyr::transmute(
+    
+    Sample =
+      as.character(
+        Sample
+      ),
+    
+    B_adolescentis =
+      as.numeric(
+        B_adolescentis
+      )
+    
+  ) %>%
+  
+  dplyr::filter(
+    
+    !is.na(
+      Sample
+    ),
+    
+    Sample != "",
+    
+    !is.na(
+      B_adolescentis
+    )
+  )
+
+
+# ============================================================
+# Match alpha-KG and B. adolescentis
+# ============================================================
+
+alpha_bado_df <- alpha_df %>%
+  
+  dplyr::inner_join(
+    bado_df,
+    by = "Sample"
+  ) %>%
+  
+  dplyr::filter(
+    !is.na(alphaKG),
+    !is.na(B_adolescentis)
+  ) %>%
+  
+  dplyr::mutate(
+    
+    # --------------------------------------------------------
+    # log10 transformation only for X-axis visualization
+    # --------------------------------------------------------
+    log_Bado =
+      log10(
+        B_adolescentis +
+          pseudo
+      )
+  )
+
+
+# ------------------------------------------------------------
+# Check matched data
+# ------------------------------------------------------------
+
+cat(
+  "\n========================================\n"
+)
+
+cat(
+  "alpha-KG + B. adolescentis\n"
+)
+
+cat(
+  "========================================\n"
+)
+
+
+cat(
+  "Matched samples:",
+  nrow(
+    alpha_bado_df
+  ),
+  "\n"
+)
+
+
+cat(
+  "B. adolescentis abundance range:",
+  range(
+    alpha_bado_df$B_adolescentis,
+    na.rm = TRUE
+  ),
+  "\n"
+)
+
+
+cat(
+  "Oxoglutaric acid abundance range:",
+  range(
+    alpha_bado_df$alphaKG,
+    na.rm = TRUE
+  ),
+  "\n"
+)
+
+
+# ============================================================
+# Spearman correlation
+# ============================================================
+
+cor_res <- suppressWarnings(
+  
+  stats::cor.test(
+    
+    alpha_bado_df$B_adolescentis,
+    
+    alpha_bado_df$alphaKG,
+    
+    method =
+      "spearman",
+    
+    exact =
+      FALSE
+  )
+)
+
+
+rho_val <- unname(
+  cor_res$estimate
+)
+
+
+p_val <- cor_res$p.value
+
+
+cat(
+  "\nSpearman correlation:\n"
+)
+
+
+cat(
+  "rho =",
+  sprintf(
+    "%.3f",
+    rho_val
+  ),
+  "\n"
+)
+
+
+cat(
+  "P =",
+  signif(
+    p_val,
+    4
+  ),
+  "\n"
+)
+
+
+# ============================================================
+# Statistics label
+# ============================================================
+
+stat_label <- paste0(
+  
+  "\u03C1 = ",
+  
+  sprintf(
+    "%.3f",
+    rho_val
+  ),
+  
+  "\nP ",
+  
+  ifelse(
+    
+    p_val < 0.001,
+    
+    "< 0.001",
+    
+    paste0(
+      "= ",
+      sprintf(
+        "%.3f",
+        p_val
+      )
+    )
+  )
+)
+
+
+# ============================================================
+# Plot
+# ============================================================
+
+p_alpha_bado <- ggplot2::ggplot(
+  
+  alpha_bado_df,
+  
+  ggplot2::aes(
+    
+    x =
+      log_Bado,
+    
+    y =
+      alphaKG
+  )
+  
+) +
+  
+
+ggplot2::geom_smooth(
+  
+  method =
+    "lm",
+  
+  formula =
+    y ~ x,
+  
+  se =
+    TRUE,
+  
+  color =
+    col_line,
+  
+  fill =
+    "#D9D9D9",
+  
+  linewidth =
+    1.1,
+  
+  alpha =
+    0.30
+) +
+  
+  
+  # ----------------------------------------------------------
+# Sample points
+# ----------------------------------------------------------
+
+ggplot2::geom_point(
+  
+  size =
+    3.0,
+  
+  alpha =
+    0.82,
+  
+  color =
+    col_point
+) +
+  
+  
+  # ----------------------------------------------------------
+# Statistics
+# ----------------------------------------------------------
+
+ggplot2::annotate(
+  
+  "text",
+  
+  x =
+    Inf,
+  
+  y =
+    Inf,
+  
+  label =
+    stat_label,
+  
+  hjust =
+    1.12,
+  
+  vjust =
+    1.25,
+  
+  family =
+    "Arial",
+  
+  fontface =
+    "bold",
+  
+  size =
+    4.2,
+  
+  color =
+    col_stat
+) +
+  
+  
+  # ----------------------------------------------------------
+# Labels
+#
+# Plain text instead of expression()
+# for Illustrator editability
+# ----------------------------------------------------------
+
+ggplot2::labs(
+  
+  title =
+    "Oxoglutaric acid",
+  
+  x =
+    "log10 B. adolescentis abundance",
+  
+  y =
+    "Oxoglutaric acid abundance"
+) +
+  
+  
+  # ----------------------------------------------------------
+# Theme
+# ----------------------------------------------------------
+
+ggplot2::theme_classic(
+  base_family =
+    "Arial"
+) +
+  
+  
+  ggplot2::theme(
+    
+    # --------------------------------------------------------
+    # Global text
+    # --------------------------------------------------------
+    
+    text =
+      ggplot2::element_text(
+        
+        family =
+          "Arial",
+        
+        face =
+          "bold",
+        
+        color =
+          "black"
+      ),
+    
+    
+    # --------------------------------------------------------
+    # Plot title
+    # --------------------------------------------------------
+    
+    plot.title =
+      ggplot2::element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          18,
+        
+        face =
+          "bold",
+        
+        hjust =
+          0.5,
+        
+        margin =
+          ggplot2::margin(
+            b = 8
+          )
+      ),
+    
+    
+    # --------------------------------------------------------
+    # X-axis title
+    # --------------------------------------------------------
+    
+    axis.title.x =
+      ggplot2::element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          13,
+        
+        face =
+          "bold",
+        
+        margin =
+          ggplot2::margin(
+            t = 8
+          )
+      ),
+    
+    
+    # --------------------------------------------------------
+    # Y-axis title
+    # --------------------------------------------------------
+    
+    axis.title.y =
+      ggplot2::element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          13,
+        
+        face =
+          "bold",
+        
+        margin =
+          ggplot2::margin(
+            r = 8
+          )
+      ),
+    
+    
+    # --------------------------------------------------------
+    # Axis tick labels
+    # --------------------------------------------------------
+    
+    axis.text =
+      ggplot2::element_text(
+        
+        family =
+          "Arial",
+        
+        size =
+          10.5,
+        
+        face =
+          "bold",
+        
+        color =
+          "black"
+      ),
+    
+    
+    # --------------------------------------------------------
+    # Remove default axis lines
+    #
+    # panel.border already provides four-sided frame
+    # --------------------------------------------------------
+    
+    axis.line =
+      ggplot2::element_blank(),
+    
+    
+    # --------------------------------------------------------
+    # Axis ticks
+    # --------------------------------------------------------
+    
+    axis.ticks =
+      ggplot2::element_line(
+        
+        color =
+          "black",
+        
+        linewidth =
+          0.9
+      ),
+    
+    
+    # --------------------------------------------------------
+    # Four-sided border
+    # --------------------------------------------------------
+    
+    panel.border =
+      ggplot2::element_rect(
+        
+        color =
+          "black",
+        
+        fill =
+          NA,
+        
+        linewidth =
+          1.4
+      ),
+    
+    
+    # --------------------------------------------------------
+    # Plot margin
+    # --------------------------------------------------------
+    
+    plot.margin =
+      ggplot2::margin(
+        
+        t =
+          8,
+        
+        r =
+          10,
+        
+        b =
+          8,
+        
+        l =
+          8
+      ),
+    
+    
+    # --------------------------------------------------------
+    # Square panel
+    # --------------------------------------------------------
+    
+    aspect.ratio =
+      1
+  )
+
+
+# ============================================================
+# Preview
+# ============================================================
+
+print(
+  p_alpha_bado
+)
+
+
+# ============================================================
+# Export correlation data
+# ============================================================
+
+write.csv(
+  
+  alpha_bado_df,
+  
+  "C:/Users/Administrator/Desktop/Fig5G_Badolescentis_alphaKG_data.csv",
+  
+  row.names =
+    FALSE
+)
+
+
+# ============================================================
+# Export PDF
+#
+# IMPORTANT:
+# NO showtext
+# NO expression()
+# Arial
+# Cairo PDF
+# ============================================================
+
+pdf_file <- paste0(
+  "C:/Users/Administrator/Desktop/",
+  "Fig5G_Badolescentis_vs_Oxoglutaric_acid_TEXT.pdf"
+)
+
+
+if (
+  file.exists(
+    pdf_file
+  )
+) {
+  
+  file.remove(
+    pdf_file
+  )
+}
+
+
+grDevices::cairo_pdf(
+  
+  filename =
+    pdf_file,
+  
+  width =
+    5.4,
+  
+  height =
+    5.4,
+  
+  family =
+    "Arial"
+)
+
+
+print(
+  p_alpha_bado
+)
+
+
+grDevices::dev.off()
+
+
+cat(
+  "\nPDF saved successfully to:\n",
+  pdf_file,
+  "\n"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
